@@ -1,6 +1,7 @@
 ﻿from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
+from app.routes import candidatos, auth
 
 app = FastAPI(
     title="RRHH-IA API",
@@ -15,6 +16,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(candidatos.router, prefix="/api/candidatos", tags=["Candidatos"])
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 
 @app.get("/")
 def health_check():

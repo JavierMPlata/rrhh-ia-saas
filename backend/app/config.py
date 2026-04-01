@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str
     GEMINI_API_KEY: str
     N8N_WEBHOOK_SECRET: str = "mi-secreto-seguro-2024"
+    N8N_WEBHOOK_URL: str = ""
     FRONTEND_URL: str = "http://localhost:3000"
     ENVIRONMENT: str = "development"
 
