@@ -125,15 +125,31 @@ async def disparar_webhook_n8n(
 ):
     webhook_url = settings.N8N_WEBHOOK_URL if hasattr(settings, 'N8N_WEBHOOK_URL') else ""
     if not webhook_url:
-        print("Warning: N8N_WEBHOOK_URL no configurado aún")
+        print("Warning: N8N_WEBHOOK_URL no configurado")
         return
+
+    # Limpiar el texto del CV para evitar caracteres que rompen JSON
+    cv_texto_limpio = cv_texto or ""
+    cv_texto_limpio = cv_texto_limpio.replace('\r\n', ' ')
+    cv_texto_limpio = cv_texto_limpio.replace('\n', ' ')
+    cv_texto_limpio = cv_texto_limpio.replace('\r', ' ')
+    cv_texto_limpio = cv_texto_limpio.replace('\t', ' ')
+    cv_texto_limpio = cv_texto_limpio.replace('"', "'")
+    cv_texto_limpio = cv_texto_limpio.replace('\\', ' ')
+    # Eliminar caracteres de control
+    cv_texto_limpio = ''.join(
+        c for c in cv_texto_limpio
+        if ord(c) >= 32 or c in ' '
+    )
+    # Limitar tamaño
+    cv_texto_limpio = cv_texto_limpio[:6000]
 
     payload = {
         "candidato_id": candidato_id,
         "nombre": candidato_nombre,
         "email": candidato_email,
         "vacante_id": vacante_id,
-        "cv_texto": cv_texto[:8000],
+        "cv_texto": cv_texto_limpio,
         "cv_url": cv_url,
         "timestamp": datetime.now().isoformat(),
         "secreto": settings.N8N_WEBHOOK_SECRET
@@ -142,6 +158,7 @@ async def disparar_webhook_n8n(
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             await client.post(webhook_url, json=payload)
+            print(f"✅ Webhook n8n disparado para candidato {candidato_id}")
     except Exception as e:
         print(f"Warning: No se pudo contactar n8n: {e}")
 
