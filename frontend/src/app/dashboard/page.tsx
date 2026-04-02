@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import type { Candidato, Evaluacion, Vacante } from '@/lib/supabase'
+import Estadisticas from '@/components/Estadisticas'
 
 type CandidatoConEvaluacion = Candidato & {
   evaluaciones?: Evaluacion[]
@@ -31,7 +32,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const supabase = createClient()
 
-  const [pestana, setPestana] = useState<'candidatos' | 'vacantes'>('candidatos')
+  const [pestana, setPestana] = useState<'candidatos' | 'vacantes' | 'estadisticas'>('candidatos')
   const [candidatos, setCandidatos] = useState<CandidatoConEvaluacion[]>([])
   const [vacantes, setVacantes] = useState<Vacante[]>([])
   const [loading, setLoading] = useState(true)
@@ -76,6 +77,11 @@ export default function DashboardPage() {
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  const cambiarEstadoVacante = async (id: string, nuevoEstado: string) => {
+    await supabase.from('vacantes').update({ estado: nuevoEstado }).eq('id', id)
+    cargarVacantes()
   }
 
   const candidatosFiltrados = candidatos
@@ -155,20 +161,23 @@ export default function DashboardPage() {
           <button
             onClick={() => setPestana('candidatos')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors
-              ${pestana === 'candidatos'
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'}`}
+              ${pestana === 'candidatos' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
             Candidatos ({candidatos.length})
           </button>
           <button
             onClick={() => setPestana('vacantes')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors
-              ${pestana === 'vacantes'
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'}`}
+              ${pestana === 'vacantes' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
             Vacantes ({vacantes.length})
+          </button>
+          <button
+            onClick={() => setPestana('estadisticas')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors
+              ${pestana === 'estadisticas' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            Estadísticas
           </button>
         </div>
 
@@ -300,9 +309,7 @@ export default function DashboardPage() {
         {pestana === 'vacantes' && (
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             {vacantes.length === 0 ? (
-              <div className="p-12 text-center text-gray-400">
-                No hay vacantes creadas aún.
-              </div>
+              <div className="p-12 text-center text-gray-400">No hay vacantes creadas aún.</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -335,20 +342,14 @@ export default function DashboardPage() {
                               </div>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-gray-600 text-xs">
-                            {v.departamento || '—'}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 text-xs capitalize">
-                            {v.modalidad}
-                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-xs">{v.departamento || '—'}</td>
+                          <td className="px-4 py-3 text-gray-600 text-xs capitalize">{v.modalidad}</td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${estadoColor}`}>
                               {v.estado}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-center text-gray-700 font-medium">
-                            {totalCandidatos}
-                          </td>
+                          <td className="px-4 py-3 text-center text-gray-700 font-medium">{totalCandidatos}</td>
                           <td className="px-4 py-3 text-center">
                             <div className="flex items-center justify-center gap-2">
                               <button
@@ -386,6 +387,11 @@ export default function DashboardPage() {
             )}
           </div>
         )}
+
+        {/* Pestaña Estadísticas */}
+        {pestana === 'estadisticas' && (
+          <Estadisticas candidatos={candidatos} />
+        )}
       </div>
 
       {modalVacante && (
@@ -405,11 +411,6 @@ export default function DashboardPage() {
       )}
     </div>
   )
-
-  async function cambiarEstadoVacante(id: string, nuevoEstado: string) {
-    await supabase.from('vacantes').update({ estado: nuevoEstado }).eq('id', id)
-    cargarVacantes()
-  }
 }
 
 function ModalVacante({
@@ -490,14 +491,12 @@ function ModalVacante({
               placeholder="Ej: Desarrollador Full Stack"
               className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Descripción *</label>
             <textarea name="descripcion" required value={form.descripcion} onChange={handleChange} rows={3}
               placeholder="Describe el cargo..."
               className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"/>
           </div>
-
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Departamento</label>
@@ -515,7 +514,6 @@ function ModalVacante({
               </select>
             </div>
           </div>
-
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Salario mínimo (COP)</label>
@@ -530,7 +528,6 @@ function ModalVacante({
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
             </div>
           </div>
-
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Experiencia mínima (años)</label>
@@ -550,33 +547,25 @@ function ModalVacante({
               </select>
             </div>
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Habilidades requeridas
-              <span className="text-gray-400 font-normal ml-1">(separadas por coma)</span>
+              Habilidades requeridas <span className="text-gray-400 font-normal">(separadas por coma)</span>
             </label>
             <input name="habilidades_requeridas" value={form.habilidades_requeridas} onChange={handleChange}
               placeholder="Ej: Python, React, SQL, Git"
               className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Valores de la empresa
-              <span className="text-gray-400 font-normal ml-1">(separados por coma)</span>
+              Valores de la empresa <span className="text-gray-400 font-normal">(separados por coma)</span>
             </label>
             <input name="valores_empresa" value={form.valores_empresa} onChange={handleChange}
               placeholder="Ej: innovacion, trabajo_en_equipo"
               className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
           </div>
-
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
-              {error}
-            </div>
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
           )}
-
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose}
               className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-lg text-sm font-medium transition-colors">
@@ -695,9 +684,7 @@ function ModalCandidato({
           {ev?.alerta_sesgo && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <p className="text-sm font-medium text-amber-800">⚠️ Alerta de posible sesgo</p>
-              <p className="text-xs text-amber-700 mt-1">
-                Tipo detectado: {ev.tipo_sesgo_detectado}.
-              </p>
+              <p className="text-xs text-amber-700 mt-1">Tipo detectado: {ev.tipo_sesgo_detectado}.</p>
             </div>
           )}
 
