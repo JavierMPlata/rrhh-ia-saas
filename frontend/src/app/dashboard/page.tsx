@@ -38,6 +38,7 @@ export default function DashboardPage() {
   const [ordenarPor, setOrdenarPor] = useState<'fecha' | 'score'>('score')
   const [candidatoSeleccionado, setCandidatoSeleccionado] = useState<CandidatoConEvaluacion | null>(null)
   const [userEmail, setUserEmail] = useState('')
+  const [modalVacante, setModalVacante] = useState(false)
 
   const cargarCandidatos = useCallback(async () => {
     setLoading(true)
@@ -100,6 +101,12 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-4">
           <span className="text-sm text-gray-500 hidden sm:block">{userEmail}</span>
+          <button
+            onClick={() => setModalVacante(true)}
+            className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
+          >
+            + Nueva vacante
+          </button>
           <button
             onClick={cargarCandidatos}
             className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
@@ -252,6 +259,13 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {modalVacante && (
+        <ModalVacante
+          onClose={() => setModalVacante(false)}
+          onCreada={() => setModalVacante(false)}
+        />
+      )}
+
       {candidatoSeleccionado && (
         <ModalCandidato
           candidato={candidatoSeleccionado}
@@ -259,6 +273,263 @@ export default function DashboardPage() {
           onActualizado={cargarCandidatos}
         />
       )}
+    </div>
+  )
+}
+
+function ModalVacante({
+  onClose,
+  onCreada
+}: {
+  onClose: () => void
+  onCreada: () => void
+}) {
+  const supabase = createClient()
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState('')
+  const [form, setForm] = useState({
+    titulo: '',
+    descripcion: '',
+    departamento: '',
+    salario_min: '',
+    salario_max: '',
+    modalidad: 'hibrido',
+    experiencia_minima: '0',
+    educacion_requerida: 'universitario',
+    habilidades_requeridas: '',
+    valores_empresa: '',
+  })
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
+  }
+
+  const handleGuardar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setGuardando(true)
+    setError('')
+
+    const habilidades = form.habilidades_requeridas
+      .split(',')
+      .map(h => h.trim())
+      .filter(h => h.length > 0)
+
+    const valores = form.valores_empresa
+      .split(',')
+      .map(v => v.trim())
+      .filter(v => v.length > 0)
+
+    const { error } = await supabase.from('vacantes').insert({
+      titulo: form.titulo,
+      descripcion: form.descripcion,
+      departamento: form.departamento || null,
+      salario_min: form.salario_min ? parseFloat(form.salario_min) : null,
+      salario_max: form.salario_max ? parseFloat(form.salario_max) : null,
+      modalidad: form.modalidad,
+      experiencia_minima: parseInt(form.experiencia_minima),
+      educacion_requerida: form.educacion_requerida,
+      habilidades_requeridas: habilidades,
+      valores_empresa: valores,
+      estado: 'activa'
+    })
+
+    if (error) {
+      setError('Error al crear la vacante: ' + error.message)
+      setGuardando(false)
+      return
+    }
+
+    onCreada()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white rounded-t-2xl">
+          <h2 className="text-lg font-semibold text-gray-900">Nueva vacante</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+        </div>
+
+        <form onSubmit={handleGuardar} className="p-6 space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Título del cargo *</label>
+            <input
+              name="titulo"
+              required
+              value={form.titulo}
+              onChange={handleChange}
+              placeholder="Ej: Desarrollador Full Stack"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm
+                         focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Descripción *</label>
+            <textarea
+              name="descripcion"
+              required
+              value={form.descripcion}
+              onChange={handleChange}
+              rows={3}
+              placeholder="Describe el cargo y las responsabilidades..."
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm
+                         focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Departamento</label>
+              <input
+                name="departamento"
+                value={form.departamento}
+                onChange={handleChange}
+                placeholder="Ej: Tecnología"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm
+                           focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Modalidad</label>
+              <select
+                name="modalidad"
+                value={form.modalidad}
+                onChange={handleChange}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-white
+                           focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="presencial">Presencial</option>
+                <option value="remoto">Remoto</option>
+                <option value="hibrido">Híbrido</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Salario mínimo (COP)</label>
+              <input
+                name="salario_min"
+                type="number"
+                value={form.salario_min}
+                onChange={handleChange}
+                placeholder="Ej: 3500000"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm
+                           focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Salario máximo (COP)</label>
+              <input
+                name="salario_max"
+                type="number"
+                value={form.salario_max}
+                onChange={handleChange}
+                placeholder="Ej: 6000000"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm
+                           focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Experiencia mínima (años)</label>
+              <input
+                name="experiencia_minima"
+                type="number"
+                min="0"
+                value={form.experiencia_minima}
+                onChange={handleChange}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm
+                           focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Educación requerida</label>
+              <select
+                name="educacion_requerida"
+                value={form.educacion_requerida}
+                onChange={handleChange}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-white
+                           focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="bachillerato">Bachillerato</option>
+                <option value="tecnico">Técnico</option>
+                <option value="tecnologo">Tecnólogo</option>
+                <option value="universitario">Universitario</option>
+                <option value="posgrado">Posgrado</option>
+                <option value="maestria">Maestría</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Habilidades requeridas
+              <span className="text-gray-400 font-normal ml-1">(separadas por coma)</span>
+            </label>
+            <input
+              name="habilidades_requeridas"
+              value={form.habilidades_requeridas}
+              onChange={handleChange}
+              placeholder="Ej: Python, React, SQL, Git"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm
+                         focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Valores de la empresa
+              <span className="text-gray-400 font-normal ml-1">(separados por coma)</span>
+            </label>
+            <input
+              name="valores_empresa"
+              value={form.valores_empresa}
+              onChange={handleChange}
+              placeholder="Ej: innovacion, trabajo_en_equipo, aprendizaje_continuo"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm
+                         focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
+              {error}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700
+                         hover:bg-gray-50 rounded-lg text-sm font-medium transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={guardando}
+              className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700
+                         disabled:bg-indigo-400 text-white rounded-lg text-sm
+                         font-medium transition-colors flex items-center justify-center gap-2"
+            >
+              {guardando ? (
+                <>
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                  Guardando...
+                </>
+              ) : 'Crear vacante'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }
@@ -280,7 +551,7 @@ function ModalCandidato({
     if (!candidato.cv_nombre_archivo) return
     const { data, error } = await supabase.storage
       .from('cvs')
-      .createSignedUrl(candidato.cv_nombre_archivo, 60)
+      .createSignedUrl(candidato.cv_nombre_archivo, 120)
     if (error) {
       alert('No se pudo acceder al CV: ' + error.message)
       return
@@ -317,7 +588,6 @@ function ModalCandidato({
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-
         <div className="p-6 border-b border-gray-100 flex items-start justify-between sticky top-0 bg-white rounded-t-2xl">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">{candidato.nombre_completo}</h2>
