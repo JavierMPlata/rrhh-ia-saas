@@ -82,7 +82,7 @@ async def aplicar_vacante(
         "ciudad": ciudad or None,
         "vacante_id": str(vacante_id) if vacante_id else None,
         "cv_url": cv_url,
-        "cv_nombre_archivo": cv.filename,
+       "cv_nombre_archivo": nombre_archivo_storage,
         "cv_mime_type": cv.content_type,
         "cv_texto_extraido": texto_cv,
         "estado": "recibido",
