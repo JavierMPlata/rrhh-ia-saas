@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import type { Candidato, Evaluacion, Vacante } from '@/lib/supabase'
 import Estadisticas from '@/components/Estadisticas'
+import ExportarCandidatos from '@/components/ExportarCandidatos'
 
 type CandidatoConEvaluacion = Candidato & {
   evaluaciones?: Evaluacion[]
@@ -213,6 +214,7 @@ export default function DashboardPage() {
                 <option value="score">Ordenar por score</option>
                 <option value="fecha">Ordenar por fecha</option>
               </select>
+              <ExportarCandidatos candidatos={candidatosFiltrados} />
             </div>
 
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
@@ -483,7 +485,6 @@ function ModalVacante({
           </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
         </div>
-
         <form onSubmit={handleGuardar} className="p-6 space-y-5">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Título del cargo *</label>
@@ -645,7 +646,6 @@ function ModalCandidato({
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none ml-4">×</button>
         </div>
-
         <div className="p-6 space-y-6">
           {ev ? (
             <div className="bg-indigo-50 rounded-xl p-5">
@@ -680,14 +680,12 @@ function ModalCandidato({
               Este candidato aún no ha sido analizado por IA.
             </div>
           )}
-
           {ev?.alerta_sesgo && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <p className="text-sm font-medium text-amber-800">⚠️ Alerta de posible sesgo</p>
               <p className="text-xs text-amber-700 mt-1">Tipo detectado: {ev.tipo_sesgo_detectado}.</p>
             </div>
           )}
-
           {ev && (
             <>
               <div>
@@ -744,7 +742,6 @@ function ModalCandidato({
               </div>
             </>
           )}
-
           <div className="border-t border-gray-100 pt-5">
             <h3 className="text-sm font-semibold text-gray-700 mb-3">Actualizar estado manualmente</h3>
             <div className="flex flex-wrap gap-2">
