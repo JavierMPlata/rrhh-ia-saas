@@ -1,3 +1,5 @@
+import re
+import base64
 import httpx
 from datetime import datetime
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException, Request
@@ -24,7 +26,6 @@ async def aplicar_vacante(
     acepta_tratamiento_datos: bool = Form(...),
     cv: UploadFile = File(...)
 ):
-    # 1. Validaciones
     if not acepta_terminos or not acepta_tratamiento_datos:
         raise HTTPException(
             status_code=400,
@@ -42,7 +43,6 @@ async def aplicar_vacante(
             detail="Solo se aceptan archivos PDF o Word (.docx)"
         )
 
-    # 2. Verificar email duplicado
     existing = supabase.table("candidatos").select("id").eq(
         "email", email
     ).execute()
@@ -52,12 +52,10 @@ async def aplicar_vacante(
             detail="Ya existe una aplicación con este correo electrónico."
         )
 
-    # 3. Leer CV
     cv_content = await cv.read()
     if len(cv_content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="El archivo no debe superar 10MB")
 
-    # 4. Subir CV a Storage
     extension = cv.filename.split('.')[-1] if cv.filename else 'pdf'
     timestamp = int(datetime.now().timestamp())
     nombre_archivo_storage = f"{email.replace('@','_')}_{timestamp}.{extension}"
@@ -70,10 +68,8 @@ async def aplicar_vacante(
 
     cv_url = f"{settings.SUPABASE_URL}/storage/v1/object/cvs/{nombre_archivo_storage}"
 
-    # 5. Extraer texto del CV
     texto_cv = extraer_texto_cv(cv_content, cv.content_type)
 
-    # 6. Guardar candidato en BD
     ip_cliente = request.client.host if request.client else None
     candidato_data = {
         "nombre_completo": nombre_completo.strip(),
@@ -82,7 +78,7 @@ async def aplicar_vacante(
         "ciudad": ciudad or None,
         "vacante_id": str(vacante_id) if vacante_id else None,
         "cv_url": cv_url,
-       "cv_nombre_archivo": nombre_archivo_storage,
+        "cv_nombre_archivo": nombre_archivo_storage,
         "cv_mime_type": cv.content_type,
         "cv_texto_extraido": texto_cv,
         "estado": "recibido",
@@ -96,7 +92,6 @@ async def aplicar_vacante(
     result = supabase.table("candidatos").insert(candidato_data).execute()
     candidato_id = result.data[0]["id"]
 
-    # 7. Disparar webhook n8n (sin bloquear la respuesta)
     await disparar_webhook_n8n(
         candidato_id=candidato_id,
         candidato_nombre=nombre_completo,
@@ -115,6 +110,23 @@ async def aplicar_vacante(
     )
 
 
+def limpiar_texto_cv(texto: str) -> str:
+    if not texto:
+        return ""
+    texto = texto.replace('\r\n', ' ')
+    texto = texto.replace('\n', ' ')
+    texto = texto.replace('\r', ' ')
+    texto = texto.replace('\t', ' ')
+    texto = texto.replace('"', ' ')
+    texto = texto.replace("'", ' ')
+    texto = texto.replace('\\', ' ')
+    texto = re.sub(r'https?://\S+', '', texto)
+    texto = re.sub(r'www\.\S+', '', texto)
+    texto = ''.join(c for c in texto if ord(c) >= 32)
+    texto = re.sub(r' +', ' ', texto).strip()
+    return texto[:4000]
+
+
 async def disparar_webhook_n8n(
     candidato_id: str,
     candidato_nombre: str,
@@ -128,35 +140,42 @@ async def disparar_webhook_n8n(
         print("Warning: N8N_WEBHOOK_URL no configurado")
         return
 
-    # Limpiar el texto del CV para evitar caracteres que rompen JSON
-    cv_texto_limpio = cv_texto or ""
-    cv_texto_limpio = cv_texto_limpio.replace('\r\n', ' ')
-    cv_texto_limpio = cv_texto_limpio.replace('\n', ' ')
-    cv_texto_limpio = cv_texto_limpio.replace('\r', ' ')
-    cv_texto_limpio = cv_texto_limpio.replace('\t', ' ')
-    cv_texto_limpio = cv_texto_limpio.replace('"', "'")
-    cv_texto_limpio = cv_texto_limpio.replace('\\', ' ')
-    # Eliminar caracteres de control
-    cv_texto_limpio = ''.join(
-        c for c in cv_texto_limpio
-        if ord(c) >= 32 or c in ' '
-    )
-    # Limitar tamaño
-    cv_texto_limpio = cv_texto_limpio[:6000]
+    # Obtener datos de la vacante desde Supabase
+    datos_vacante = {}
+    if vacante_id:
+        try:
+            result = supabase.table("vacantes").select(
+                "titulo, descripcion, habilidades_requeridas, experiencia_minima, educacion_requerida, valores_empresa"
+            ).eq("id", vacante_id).single().execute()
+            if result.data:
+                datos_vacante = result.data
+        except Exception as e:
+            print(f"Warning: No se pudieron obtener datos de la vacante: {e}")
+
+    # Limpiar y encodear el CV en Base64
+    cv_texto_limpio = limpiar_texto_cv(cv_texto)
+    cv_texto_b64 = base64.b64encode(cv_texto_limpio.encode('utf-8')).decode('utf-8')
 
     payload = {
         "candidato_id": candidato_id,
         "nombre": candidato_nombre,
         "email": candidato_email,
         "vacante_id": vacante_id,
-        "cv_texto": cv_texto_limpio,
+        "cv_texto": cv_texto_b64,
+        "cv_texto_encoded": True,
         "cv_url": cv_url,
         "timestamp": datetime.now().isoformat(),
-        "secreto": settings.N8N_WEBHOOK_SECRET
+        "secreto": settings.N8N_WEBHOOK_SECRET,
+        "vacante_titulo": datos_vacante.get("titulo", ""),
+        "vacante_descripcion": datos_vacante.get("descripcion", ""),
+        "vacante_habilidades": datos_vacante.get("habilidades_requeridas", []),
+        "vacante_experiencia_minima": datos_vacante.get("experiencia_minima", 0),
+        "vacante_educacion": datos_vacante.get("educacion_requerida", ""),
+        "vacante_valores": datos_vacante.get("valores_empresa", [])
     }
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             await client.post(webhook_url, json=payload)
             print(f"✅ Webhook n8n disparado para candidato {candidato_id}")
     except Exception as e:
