@@ -34,6 +34,8 @@ export type Evaluacion = {
   habilidades_detectadas: string[]
   experiencia_anos: number
   nivel_educativo: string
+  ultimo_cargo?: string
+  ultima_empresa?: string
   resumen_perfil: string
   fortalezas: string[]
   areas_mejora: string[]
