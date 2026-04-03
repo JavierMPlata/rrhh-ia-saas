@@ -201,7 +201,6 @@ export default function DashboardPage() {
         {/* Pestaña Candidatos */}
         {pestana === 'candidatos' && (
           <>
-            {/* Filtros básicos */}
             <div className="bg-white rounded-xl border border-gray-100 p-4 mb-3 space-y-3">
               <div className="flex flex-wrap gap-3">
                 <input
@@ -235,7 +234,6 @@ export default function DashboardPage() {
                 <ExportarCandidatos candidatos={candidatosFiltrados} />
               </div>
 
-              {/* Filtros avanzados */}
               {mostrarFiltrosAvanzados && (
                 <div className="flex flex-wrap gap-3 pt-3 border-t border-gray-100">
                   <div className="flex flex-col gap-1">
@@ -252,7 +250,6 @@ export default function DashboardPage() {
                       ))}
                     </select>
                   </div>
-
                   <div className="flex flex-col gap-1">
                     <label className="text-xs text-gray-500 font-medium">Vacante</label>
                     <select
@@ -267,7 +264,6 @@ export default function DashboardPage() {
                       ))}
                     </select>
                   </div>
-
                   <div className="flex flex-col gap-1">
                     <label className="text-xs text-gray-500 font-medium">Recomendación IA</label>
                     <select
@@ -282,7 +278,6 @@ export default function DashboardPage() {
                       <option value="descartar">Descartar</option>
                     </select>
                   </div>
-
                   <div className="flex flex-col gap-1">
                     <label className="text-xs text-gray-500 font-medium">Ordenar por</label>
                     <select
@@ -298,7 +293,6 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* Resumen de filtros activos */}
               {hayFiltrosActivos && (
                 <div className="text-xs text-gray-500 pt-1">
                   Mostrando <span className="font-semibold text-indigo-600">{candidatosFiltrados.length}</span> de {candidatos.length} candidatos
@@ -451,6 +445,13 @@ export default function DashboardPage() {
                           <td className="px-4 py-3 text-center text-gray-700 font-medium">{totalCandidatos}</td>
                           <td className="px-4 py-3 text-center">
                             <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={() => router.push(`/dashboard/vacante/${v.id}`)}
+                                className="text-purple-600 hover:text-purple-800 text-xs font-medium
+                                           bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors"
+                              >
+                                Ver detalle
+                              </button>
                               <button
                                 onClick={() => { setVacanteEditar(v); setModalVacante(true) }}
                                 className="text-indigo-600 hover:text-indigo-800 text-xs font-medium
@@ -751,7 +752,6 @@ function ModalCandidato({
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none ml-4">×</button>
         </div>
-
         <div className="p-6 space-y-6">
           {ev ? (
             <div className="bg-indigo-50 rounded-xl p-5">
@@ -786,14 +786,12 @@ function ModalCandidato({
               Este candidato aún no ha sido analizado por IA.
             </div>
           )}
-
           {ev?.alerta_sesgo && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <p className="text-sm font-medium text-amber-800">⚠️ Alerta de posible sesgo</p>
               <p className="text-xs text-amber-700 mt-1">Tipo detectado: {ev.tipo_sesgo_detectado}.</p>
             </div>
           )}
-
           {ev && (
             <>
               <div>
@@ -850,8 +848,6 @@ function ModalCandidato({
               </div>
             </>
           )}
-
-          {/* Notas del equipo RRHH */}
           <div className="border-t border-gray-100 pt-5">
             <h3 className="text-sm font-semibold text-gray-700 mb-2">📝 Notas del equipo RRHH</h3>
             <textarea
@@ -863,9 +859,7 @@ function ModalCandidato({
                          bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
             />
             <div className="flex items-center justify-between mt-2">
-              <span className="text-xs text-gray-400">
-                Estas notas son visibles solo para el equipo de RRHH
-              </span>
+              <span className="text-xs text-gray-400">Visibles solo para el equipo de RRHH</span>
               <button
                 onClick={guardarNota}
                 disabled={guardandoNota}
@@ -876,8 +870,6 @@ function ModalCandidato({
               </button>
             </div>
           </div>
-
-          {/* Acciones */}
           <div className="border-t border-gray-100 pt-5">
             <h3 className="text-sm font-semibold text-gray-700 mb-3">Actualizar estado manualmente</h3>
             <div className="flex flex-wrap gap-2">
