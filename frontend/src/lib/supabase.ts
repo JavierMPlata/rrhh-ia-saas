@@ -70,20 +70,6 @@ export type PerfilUsuario = {
   created_at: string
 }
 
-export type EmpresaConfig = {
-  id: string
-  nombre: string
-  nit?: string
-  descripcion?: string
-  sector?: string
-  ciudad?: string
-  direccion?: string
-  telefono?: string
-  email_contacto?: string
-  website?: string
-  logo_url?: string
-  color_primario: string
-}
 
 export type Auditoria = {
   id: number

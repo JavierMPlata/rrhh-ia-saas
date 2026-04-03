@@ -2,21 +2,17 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import type { PerfilUsuario, EmpresaConfig, Auditoria } from '@/lib/supabase'
+import type { PerfilUsuario, Auditoria } from '@/lib/supabase'
 
 export default function AdminPage() {
   const router = useRouter()
   const supabase = createClient()
 
-  const [pestana, setPestana] = useState<'usuarios' | 'empresa' | 'auditoria'>('usuarios')
+  const [pestana, setPestana] = useState<'usuarios' | 'auditoria'>('usuarios')
   const [perfiles, setPerfiles] = useState<PerfilUsuario[]>([])
-  const [empresa, setEmpresa] = useState<EmpresaConfig | null>(null)
   const [auditoria, setAuditoria] = useState<Auditoria[]>([])
   const [loading, setLoading] = useState(true)
   const [modalUsuario, setModalUsuario] = useState(false)
-  const [guardandoEmpresa, setGuardandoEmpresa] = useState(false)
-  const [empresaGuardada, setEmpresaGuardada] = useState(false)
-  const [formEmpresa, setFormEmpresa] = useState<Partial<EmpresaConfig>>({})
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
@@ -36,16 +32,11 @@ export default function AdminPage() {
 
   const cargarDatos = async () => {
     setLoading(true)
-    const [perfilesRes, empresaRes, auditoriaRes] = await Promise.all([
+    const [perfilesRes, auditoriaRes] = await Promise.all([
       supabase.from('perfiles_usuario').select('*').order('created_at', { ascending: false }),
-      supabase.from('empresa_config').select('*').single(),
       supabase.from('auditoria').select('*').order('created_at', { ascending: false }).limit(100)
     ])
     if (perfilesRes.data) setPerfiles(perfilesRes.data as PerfilUsuario[])
-    if (empresaRes.data) {
-      setEmpresa(empresaRes.data as EmpresaConfig)
-      setFormEmpresa(empresaRes.data as EmpresaConfig)
-    }
     if (auditoriaRes.data) setAuditoria(auditoriaRes.data as Auditoria[])
     setLoading(false)
   }
@@ -57,17 +48,6 @@ export default function AdminPage() {
 
   const toggleActivo = async (userId: string, activo: boolean) => {
     await supabase.from('perfiles_usuario').update({ activo: !activo }).eq('user_id', userId)
-    cargarDatos()
-  }
-
-  const guardarEmpresa = async () => {
-    setGuardandoEmpresa(true)
-    if (empresa?.id) {
-      await supabase.from('empresa_config').update(formEmpresa).eq('id', empresa.id)
-    }
-    setGuardandoEmpresa(false)
-    setEmpresaGuardada(true)
-    setTimeout(() => setEmpresaGuardada(false), 2000)
     cargarDatos()
   }
 
@@ -161,7 +141,6 @@ export default function AdminPage() {
         <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-xl w-fit">
           {[
             { id: 'usuarios', label: `Usuarios (${perfiles.length})` },
-            { id: 'empresa', label: 'Perfil de empresa' },
             { id: 'auditoria', label: `Auditoría (${auditoria.length})` },
           ].map(p => (
             <button
@@ -245,120 +224,6 @@ export default function AdminPage() {
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
-
-        {/* Pestaña Empresa */}
-        {pestana === 'empresa' && formEmpresa && (
-          <div className="bg-white rounded-xl border border-gray-100 p-6 space-y-5">
-            <h2 className="text-base font-semibold text-gray-800">Perfil de la empresa</h2>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Nombre de la empresa *</label>
-                <input
-                  value={formEmpresa.nombre || ''}
-                  onChange={e => setFormEmpresa(p => ({ ...p, nombre: e.target.value }))}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">NIT</label>
-                <input
-                  value={formEmpresa.nit || ''}
-                  onChange={e => setFormEmpresa(p => ({ ...p, nit: e.target.value }))}
-                  placeholder="900.123.456-7"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Sector</label>
-                <input
-                  value={formEmpresa.sector || ''}
-                  onChange={e => setFormEmpresa(p => ({ ...p, sector: e.target.value }))}
-                  placeholder="Tecnología, Salud, Finanzas..."
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Ciudad</label>
-                <input
-                  value={formEmpresa.ciudad || ''}
-                  onChange={e => setFormEmpresa(p => ({ ...p, ciudad: e.target.value }))}
-                  placeholder="Bogotá"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Teléfono</label>
-                <input
-                  value={formEmpresa.telefono || ''}
-                  onChange={e => setFormEmpresa(p => ({ ...p, telefono: e.target.value }))}
-                  placeholder="+57 1 234 5678"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Email de contacto</label>
-                <input
-                  value={formEmpresa.email_contacto || ''}
-                  onChange={e => setFormEmpresa(p => ({ ...p, email_contacto: e.target.value }))}
-                  placeholder="contacto@empresa.com"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Sitio web</label>
-                <input
-                  value={formEmpresa.website || ''}
-                  onChange={e => setFormEmpresa(p => ({ ...p, website: e.target.value }))}
-                  placeholder="https://www.empresa.com"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Color primario</label>
-                <div className="flex gap-2">
-                  <input
-                    type="color"
-                    value={formEmpresa.color_primario || '#6366f1'}
-                    onChange={e => setFormEmpresa(p => ({ ...p, color_primario: e.target.value }))}
-                    className="h-10 w-16 rounded-lg border border-gray-200 cursor-pointer"
-                  />
-                  <input
-                    value={formEmpresa.color_primario || '#6366f1'}
-                    onChange={e => setFormEmpresa(p => ({ ...p, color_primario: e.target.value }))}
-                    className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Descripción de la empresa</label>
-              <textarea
-                value={formEmpresa.descripcion || ''}
-                onChange={e => setFormEmpresa(p => ({ ...p, descripcion: e.target.value }))}
-                rows={3}
-                placeholder="Describe tu empresa, misión y valores..."
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Dirección</label>
-              <input
-                value={formEmpresa.direccion || ''}
-                onChange={e => setFormEmpresa(p => ({ ...p, direccion: e.target.value }))}
-                placeholder="Calle 123 # 45-67, Bogotá"
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            <button
-              onClick={guardarEmpresa}
-              disabled={guardandoEmpresa}
-              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400
-                         text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              {empresaGuardada ? '✓ Guardado' : guardandoEmpresa ? 'Guardando...' : 'Guardar cambios'}
-            </button>
           </div>
         )}
 
