@@ -56,6 +56,8 @@ export type Vacante = {
   estado: 'activa' | 'pausada' | 'cerrada'
   habilidades_requeridas: string[]
   experiencia_minima: number
+  educacion_requerida?: string
+  valores_empresa?: string[]
 }
 
 export type PerfilUsuario = {
