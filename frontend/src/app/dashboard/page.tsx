@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import type { Candidato, Evaluacion, Vacante } from '@/lib/supabase'
 import Estadisticas from '@/components/Estadisticas'
 import ExportarCandidatos from '@/components/ExportarCandidatos'
+import { registrarAuditoria } from '@/lib/auditoria'
 
 type CandidatoConEvaluacion = Candidato & {
   evaluaciones?: Evaluacion[]
@@ -12,21 +13,21 @@ type CandidatoConEvaluacion = Candidato & {
 }
 
 const ESTADOS_COLOR: Record<string, string> = {
-  recibido:        'bg-gray-100 text-gray-600',
-  en_proceso:      'bg-blue-100 text-blue-700',
-  analizado:       'bg-purple-100 text-purple-700',
+  recibido: 'bg-gray-100 text-gray-600',
+  en_proceso: 'bg-blue-100 text-blue-700',
+  analizado: 'bg-purple-100 text-purple-700',
   preseleccionado: 'bg-green-100 text-green-700',
-  descartado:      'bg-red-100 text-red-700',
-  banco_talentos:  'bg-amber-100 text-amber-700',
+  descartado: 'bg-red-100 text-red-700',
+  banco_talentos: 'bg-amber-100 text-amber-700',
 }
 
 const ESTADOS_ETIQUETA: Record<string, string> = {
-  recibido:        'Recibido',
-  en_proceso:      'En proceso',
-  analizado:       'Analizado',
+  recibido: 'Recibido',
+  en_proceso: 'En proceso',
+  analizado: 'Analizado',
   preseleccionado: 'Preseleccionado',
-  descartado:      'Descartado',
-  banco_talentos:  'Banco de talentos',
+  descartado: 'Descartado',
+  banco_talentos: 'Banco de talentos',
 }
 
 export default function DashboardPage() {
@@ -74,17 +75,25 @@ export default function DashboardPage() {
         setUserEmail(user.email || '')
         cargarCandidatos()
         cargarVacantes()
+        registrarAuditoria('acceso_dashboard')
       }
     })
   }, [])
 
   const handleLogout = async () => {
+    await registrarAuditoria('cierre_sesion')
     await supabase.auth.signOut()
     router.push('/login')
   }
 
   const cambiarEstadoVacante = async (id: string, nuevoEstado: string) => {
     await supabase.from('vacantes').update({ estado: nuevoEstado }).eq('id', id)
+    await registrarAuditoria(
+      'cambio_estado_vacante',
+      'vacantes',
+      id,
+      { estado_nuevo: nuevoEstado }
+    )
     cargarVacantes()
   }
 
@@ -150,6 +159,12 @@ export default function DashboardPage() {
             + Nueva vacante
           </button>
           <button
+            onClick={() => router.push('/dashboard/admin')}
+            className="text-sm text-purple-600 hover:text-purple-800 font-medium"
+          >
+            ⚙️ Admin
+          </button>
+          <button
             onClick={() => { cargarCandidatos(); cargarVacantes() }}
             className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
           >
@@ -165,7 +180,6 @@ export default function DashboardPage() {
       </nav>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
           {[
             { label: 'Total candidatos', value: stats.total, color: 'text-gray-900' },
@@ -180,7 +194,6 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* Pestañas */}
         <div className="flex gap-1 mb-4 bg-gray-100 p-1 rounded-xl w-fit">
           {[
             { id: 'candidatos', label: `Candidatos (${candidatos.length})` },
@@ -198,7 +211,6 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* Pestaña Candidatos */}
         {pestana === 'candidatos' && (
           <>
             <div className="bg-white rounded-xl border border-gray-100 p-4 mb-3 space-y-3">
@@ -220,7 +232,7 @@ export default function DashboardPage() {
                 >
                   Filtros
                   {hayFiltrosActivos && (
-                    <span className="w-2 h-2 rounded-full bg-indigo-600 inline-block"/>
+                    <span className="w-2 h-2 rounded-full bg-indigo-600 inline-block" />
                   )}
                 </button>
                 {hayFiltrosActivos && (
@@ -303,7 +315,7 @@ export default function DashboardPage() {
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
               {loading ? (
                 <div className="p-12 text-center text-gray-400">
-                  <div className="animate-spin w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto mb-3"/>
+                  <div className="animate-spin w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto mb-3" />
                   Cargando candidatos...
                 </div>
               ) : candidatosFiltrados.length === 0 ? (
@@ -335,12 +347,12 @@ export default function DashboardPage() {
                         const score = ev?.score_total ?? null
                         const scoreColor = score === null ? 'text-gray-400'
                           : score >= 80 ? 'text-green-600'
-                          : score >= 60 ? 'text-amber-500'
-                          : 'text-red-500'
+                            : score >= 60 ? 'text-amber-500'
+                              : 'text-red-500'
                         const recomColor = ev?.recomendacion === 'contratar' ? 'bg-green-100 text-green-700'
                           : ev?.recomendacion === 'entrevistar' ? 'bg-blue-100 text-blue-700'
-                          : ev?.recomendacion === 'descartar' ? 'bg-red-100 text-red-700'
-                          : 'bg-gray-100 text-gray-500'
+                            : ev?.recomendacion === 'descartar' ? 'bg-red-100 text-red-700'
+                              : 'bg-gray-100 text-gray-500'
                         return (
                           <tr key={c.id} className="hover:bg-gray-50 transition-colors">
                             <td className="px-4 py-3">
@@ -398,7 +410,6 @@ export default function DashboardPage() {
           </>
         )}
 
-        {/* Pestaña Vacantes */}
         {pestana === 'vacantes' && (
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             {vacantes.length === 0 ? (
@@ -421,7 +432,7 @@ export default function DashboardPage() {
                       const totalCandidatos = candidatos.filter(c => c.vacante_id === v.id).length
                       const estadoColor = v.estado === 'activa' ? 'bg-green-100 text-green-700'
                         : v.estado === 'pausada' ? 'bg-amber-100 text-amber-700'
-                        : 'bg-red-100 text-red-700'
+                          : 'bg-red-100 text-red-700'
                       return (
                         <tr key={v.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-4 py-3">
@@ -488,7 +499,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Pestaña Estadísticas */}
         {pestana === 'estadisticas' && (
           <Estadisticas candidatos={candidatos} />
         )}
@@ -563,9 +573,11 @@ function ModalVacante({
     if (vacante) {
       const { error } = await supabase.from('vacantes').update(datos).eq('id', vacante.id)
       if (error) { setError('Error al actualizar: ' + error.message); setGuardando(false); return }
+      await registrarAuditoria('editar_vacante', 'vacantes', vacante.id, { titulo: datos.titulo })
     } else {
-      const { error } = await supabase.from('vacantes').insert({ ...datos, estado: 'activa' })
+      const { data, error } = await supabase.from('vacantes').insert({ ...datos, estado: 'activa' }).select().single()
       if (error) { setError('Error al crear: ' + error.message); setGuardando(false); return }
+      await registrarAuditoria('crear_vacante', 'vacantes', data?.id, { titulo: datos.titulo })
     }
     onGuardada()
   }
@@ -584,20 +596,20 @@ function ModalVacante({
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Título del cargo *</label>
             <input name="titulo" required value={form.titulo} onChange={handleChange}
               placeholder="Ej: Desarrollador Full Stack"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Descripción *</label>
             <textarea name="descripcion" required value={form.descripcion} onChange={handleChange} rows={3}
               placeholder="Describe el cargo..."
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"/>
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Departamento</label>
               <input name="departamento" value={form.departamento} onChange={handleChange}
                 placeholder="Ej: Tecnología"
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Modalidad</label>
@@ -614,20 +626,20 @@ function ModalVacante({
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Salario mínimo (COP)</label>
               <input name="salario_min" type="number" value={form.salario_min} onChange={handleChange}
                 placeholder="Ej: 3500000"
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Salario máximo (COP)</label>
               <input name="salario_max" type="number" value={form.salario_max} onChange={handleChange}
                 placeholder="Ej: 6000000"
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Experiencia mínima (años)</label>
               <input name="experiencia_minima" type="number" min="0" value={form.experiencia_minima} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Educación requerida</label>
@@ -648,7 +660,7 @@ function ModalVacante({
             </label>
             <input name="habilidades_requeridas" value={form.habilidades_requeridas} onChange={handleChange}
               placeholder="Ej: Python, React, SQL, Git"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -656,7 +668,7 @@ function ModalVacante({
             </label>
             <input name="valores_empresa" value={form.valores_empresa} onChange={handleChange}
               placeholder="Ej: innovacion, trabajo_en_equipo"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
@@ -671,8 +683,8 @@ function ModalVacante({
               {guardando ? (
                 <>
                   <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                   Guardando...
                 </>
@@ -707,12 +719,23 @@ function ModalCandidato({
       .from('cvs')
       .createSignedUrl(candidato.cv_nombre_archivo, 120)
     if (error) { alert('No se pudo acceder al CV: ' + error.message); return }
+    await registrarAuditoria('ver_cv', 'candidatos', candidato.id, { candidato: candidato.nombre_completo })
     window.open(data.signedUrl, '_blank')
   }
 
   const actualizarEstado = async (nuevoEstado: string) => {
     setActualizando(true)
     await supabase.from('candidatos').update({ estado: nuevoEstado }).eq('id', candidato.id)
+    await registrarAuditoria(
+      'cambio_estado_candidato',
+      'candidatos',
+      candidato.id,
+      {
+        estado_anterior: candidato.estado,
+        estado_nuevo: nuevoEstado,
+        candidato: candidato.nombre_completo
+      }
+    )
     onActualizado()
     onClose()
     setActualizando(false)
@@ -721,6 +744,12 @@ function ModalCandidato({
   const guardarNota = async () => {
     setGuardandoNota(true)
     await supabase.from('candidatos').update({ notas }).eq('id', candidato.id)
+    await registrarAuditoria(
+      'agregar_nota_candidato',
+      'candidatos',
+      candidato.id,
+      { candidato: candidato.nombre_completo }
+    )
     setGuardandoNota(false)
     setNotaGuardada(true)
     setTimeout(() => setNotaGuardada(false), 2000)
@@ -735,7 +764,7 @@ function ModalCandidato({
       </div>
       <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${color} transition-all duration-700`}
-          style={{ width: `${Math.min(100, Number(value))}%` }}/>
+          style={{ width: `${Math.min(100, Number(value))}%` }} />
       </div>
     </div>
   )
@@ -763,7 +792,7 @@ function ModalCandidato({
                     <span className={`font-semibold capitalize
                       ${ev.recomendacion === 'contratar' ? 'text-green-600'
                         : ev.recomendacion === 'descartar' ? 'text-red-600'
-                        : 'text-blue-600'}`}>
+                          : 'text-blue-600'}`}>
                       {ev.recomendacion}
                     </span>
                   </p>
@@ -771,7 +800,7 @@ function ModalCandidato({
                 <div className={`text-4xl font-bold
                   ${Number(ev.score_total) >= 80 ? 'text-green-600'
                     : Number(ev.score_total) >= 60 ? 'text-amber-500'
-                    : 'text-red-500'}`}>
+                      : 'text-red-500'}`}>
                   {Number(ev.score_total).toFixed(0)}
                   <span className="text-lg text-gray-400">/100</span>
                 </div>

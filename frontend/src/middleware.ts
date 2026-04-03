@@ -9,9 +9,7 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
+        getAll() { return request.cookies.getAll() },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
@@ -32,6 +30,34 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
+  }
+
+  // Si tiene sesión, verificar que el usuario esté activo
+  if (request.nextUrl.pathname.startsWith('/dashboard') && user) {
+    const { data: perfil } = await supabase
+      .from('perfiles_usuario')
+      .select('activo, rol')
+      .eq('user_id', user.id)
+      .single()
+
+    // Si el perfil existe y está inactivo → cerrar sesión y redirigir
+    if (perfil && !perfil.activo) {
+      await supabase.auth.signOut()
+      const url = request.nextUrl.clone()
+      url.pathname = '/login'
+      url.searchParams.set('error', 'cuenta_inactiva')
+      return NextResponse.redirect(url)
+    }
+
+    // Si intenta ir a /admin sin ser admin → redirigir al dashboard
+    if (
+      request.nextUrl.pathname.startsWith('/dashboard/admin') &&
+      perfil?.rol !== 'admin'
+    ) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/dashboard'
+      return NextResponse.redirect(url)
+    }
   }
 
   // Ya logueado intentando ir al login → redirigir al dashboard
