@@ -42,6 +42,7 @@ export type Evaluacion = {
   recomendacion: 'contratar' | 'entrevistar' | 'descartar'
   justificacion_recomendacion: string
   alerta_sesgo: boolean
+  tipo_sesgo_detectado?: string
   created_at: string
 }
 
