@@ -557,7 +557,7 @@ function ModalVacante({
     setGuardando(true)
     setError('')
     const habilidades = form.habilidades_requeridas.split(',').map(h => h.trim()).filter(h => h.length > 0)
-    const valores = form.valores_empresa.split(',').map(v => v.trim()).filter(v => v.length > 0)
+    const valores = form.valores_empresa.split(',').map((val: string) => val.trim()).filter((val: string) => val.length > 0)
     const datos = {
       titulo: form.titulo,
       descripcion: form.descripcion,
