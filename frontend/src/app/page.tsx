@@ -211,8 +211,8 @@ export default function FormularioPublico() {
                 className="mt-0.5 h-4 w-4 text-indigo-600 border-gray-300 rounded"
               />
               <span className="text-xs text-blue-800">
-                Acepto los términos y condiciones del proceso de selección y declaro que 
-                la información suministrada es veraz y comprobable.
+                Acepto los términos y condiciones del proceso de selección y declaro que
+                la información suministrada es veraz y comprobable. *
               </span>
             </label>
             <label className="flex items-start gap-3 cursor-pointer">
@@ -225,9 +225,20 @@ export default function FormularioPublico() {
               />
               <span className="text-xs text-blue-800">
                 Autorizo el tratamiento de mis datos personales con fines de selección de personal,
-                de acuerdo con la Ley Estatutaria 1581 de 2012 y sus decretos reglamentarios.
+                de acuerdo con la{' '}
+                <a href="/privacidad" target="_blank" className="underline font-medium hover:text-blue-900">
+                  Política de Privacidad
+                </a>
+                {' '}y la Ley Estatutaria 1581 de 2012. *
               </span>
             </label>
+            <p className="text-xs text-blue-700 pt-1 border-t border-blue-200">
+              Puedes ejercer tu derecho al olvido en cualquier momento desde{' '}
+              <a href="/eliminar-datos" target="_blank" className="underline font-medium hover:text-blue-900">
+                esta página
+              </a>.
+              Tus datos serán conservados máximo 2 años o hasta que solicites su eliminación.
+            </p>
           </div>
 
           {error && (
