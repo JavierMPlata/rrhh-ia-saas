@@ -38,8 +38,11 @@ export default function DashboardPage() {
   const [vacantes, setVacantes] = useState<Vacante[]>([])
   const [loading, setLoading] = useState(true)
   const [filtroEstado, setFiltroEstado] = useState('todos')
+  const [filtroVacante, setFiltroVacante] = useState('todas')
+  const [filtroRecomendacion, setFiltroRecomendacion] = useState('todas')
   const [busqueda, setBusqueda] = useState('')
   const [ordenarPor, setOrdenarPor] = useState<'fecha' | 'score'>('score')
+  const [mostrarFiltrosAvanzados, setMostrarFiltrosAvanzados] = useState(false)
   const [candidatoSeleccionado, setCandidatoSeleccionado] = useState<CandidatoConEvaluacion | null>(null)
   const [userEmail, setUserEmail] = useState('')
   const [modalVacante, setModalVacante] = useState(false)
@@ -88,10 +91,18 @@ export default function DashboardPage() {
   const candidatosFiltrados = candidatos
     .filter(c => {
       const matchEstado = filtroEstado === 'todos' || c.estado === filtroEstado
+      const matchVacante = filtroVacante === 'todas' || c.vacante_id === filtroVacante
+      const matchRecomendacion = filtroRecomendacion === 'todas' ||
+        c.evaluaciones?.[0]?.recomendacion === filtroRecomendacion
       const matchBusqueda = !busqueda ||
         c.nombre_completo.toLowerCase().includes(busqueda.toLowerCase()) ||
-        c.email.toLowerCase().includes(busqueda.toLowerCase())
-      return matchEstado && matchBusqueda
+        c.email.toLowerCase().includes(busqueda.toLowerCase()) ||
+        c.ciudad?.toLowerCase().includes(busqueda.toLowerCase()) ||
+        c.evaluaciones?.[0]?.habilidades_detectadas?.some(h =>
+          h.toLowerCase().includes(busqueda.toLowerCase())
+        ) ||
+        c.evaluaciones?.[0]?.ultimo_cargo?.toLowerCase().includes(busqueda.toLowerCase())
+      return matchEstado && matchVacante && matchRecomendacion && matchBusqueda
     })
     .sort((a, b) => {
       if (ordenarPor === 'score') {
@@ -107,6 +118,18 @@ export default function DashboardPage() {
     preseleccionados: candidatos.filter(c => c.estado === 'preseleccionado').length,
     analizados: candidatos.filter(c => c.estado === 'analizado').length,
     descartados: candidatos.filter(c => c.estado === 'descartado').length,
+  }
+
+  const hayFiltrosActivos = filtroEstado !== 'todos' ||
+    filtroVacante !== 'todas' ||
+    filtroRecomendacion !== 'todas' ||
+    busqueda !== ''
+
+  const limpiarFiltros = () => {
+    setFiltroEstado('todos')
+    setFiltroVacante('todas')
+    setFiltroRecomendacion('todas')
+    setBusqueda('')
   }
 
   return (
@@ -159,62 +182,128 @@ export default function DashboardPage() {
 
         {/* Pestañas */}
         <div className="flex gap-1 mb-4 bg-gray-100 p-1 rounded-xl w-fit">
-          <button
-            onClick={() => setPestana('candidatos')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors
-              ${pestana === 'candidatos' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            Candidatos ({candidatos.length})
-          </button>
-          <button
-            onClick={() => setPestana('vacantes')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors
-              ${pestana === 'vacantes' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            Vacantes ({vacantes.length})
-          </button>
-          <button
-            onClick={() => setPestana('estadisticas')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors
-              ${pestana === 'estadisticas' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            Estadísticas
-          </button>
+          {[
+            { id: 'candidatos', label: `Candidatos (${candidatos.length})` },
+            { id: 'vacantes', label: `Vacantes (${vacantes.length})` },
+            { id: 'estadisticas', label: 'Estadísticas' },
+          ].map(p => (
+            <button
+              key={p.id}
+              onClick={() => setPestana(p.id as any)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                ${pestana === p.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
 
         {/* Pestaña Candidatos */}
         {pestana === 'candidatos' && (
           <>
-            <div className="bg-white rounded-xl border border-gray-100 p-4 mb-4 flex flex-wrap gap-3">
-              <input
-                type="text"
-                placeholder="Buscar por nombre o email..."
-                value={busqueda}
-                onChange={e => setBusqueda(e.target.value)}
-                className="flex-1 min-w-48 px-4 py-2 border border-gray-200 rounded-lg text-sm
-                           focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-              <select
-                value={filtroEstado}
-                onChange={e => setFiltroEstado(e.target.value)}
-                className="px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white
-                           focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="todos">Todos los estados</option>
-                {Object.entries(ESTADOS_ETIQUETA).map(([val, label]) => (
-                  <option key={val} value={val}>{label}</option>
-                ))}
-              </select>
-              <select
-                value={ordenarPor}
-                onChange={e => setOrdenarPor(e.target.value as 'fecha' | 'score')}
-                className="px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white
-                           focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="score">Ordenar por score</option>
-                <option value="fecha">Ordenar por fecha</option>
-              </select>
-              <ExportarCandidatos candidatos={candidatosFiltrados} />
+            {/* Filtros básicos */}
+            <div className="bg-white rounded-xl border border-gray-100 p-4 mb-3 space-y-3">
+              <div className="flex flex-wrap gap-3">
+                <input
+                  type="text"
+                  placeholder="Buscar por nombre, email, ciudad, cargo o habilidad..."
+                  value={busqueda}
+                  onChange={e => setBusqueda(e.target.value)}
+                  className="flex-1 min-w-48 px-4 py-2 border border-gray-200 rounded-lg text-sm
+                             text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <button
+                  onClick={() => setMostrarFiltrosAvanzados(!mostrarFiltrosAvanzados)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2
+                    ${mostrarFiltrosAvanzados || hayFiltrosActivos
+                      ? 'bg-indigo-100 text-indigo-700'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                >
+                  Filtros
+                  {hayFiltrosActivos && (
+                    <span className="w-2 h-2 rounded-full bg-indigo-600 inline-block"/>
+                  )}
+                </button>
+                {hayFiltrosActivos && (
+                  <button
+                    onClick={limpiarFiltros}
+                    className="px-4 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    Limpiar filtros
+                  </button>
+                )}
+                <ExportarCandidatos candidatos={candidatosFiltrados} />
+              </div>
+
+              {/* Filtros avanzados */}
+              {mostrarFiltrosAvanzados && (
+                <div className="flex flex-wrap gap-3 pt-3 border-t border-gray-100">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-gray-500 font-medium">Estado</label>
+                    <select
+                      value={filtroEstado}
+                      onChange={e => setFiltroEstado(e.target.value)}
+                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900
+                                 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="todos">Todos los estados</option>
+                      {Object.entries(ESTADOS_ETIQUETA).map(([val, label]) => (
+                        <option key={val} value={val}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-gray-500 font-medium">Vacante</label>
+                    <select
+                      value={filtroVacante}
+                      onChange={e => setFiltroVacante(e.target.value)}
+                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900
+                                 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="todas">Todas las vacantes</option>
+                      {vacantes.map(v => (
+                        <option key={v.id} value={v.id}>{v.titulo}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-gray-500 font-medium">Recomendación IA</label>
+                    <select
+                      value={filtroRecomendacion}
+                      onChange={e => setFiltroRecomendacion(e.target.value)}
+                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900
+                                 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="todas">Todas</option>
+                      <option value="contratar">Contratar</option>
+                      <option value="entrevistar">Entrevistar</option>
+                      <option value="descartar">Descartar</option>
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-gray-500 font-medium">Ordenar por</label>
+                    <select
+                      value={ordenarPor}
+                      onChange={e => setOrdenarPor(e.target.value as 'fecha' | 'score')}
+                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900
+                                 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="score">Mayor score</option>
+                      <option value="fecha">Más reciente</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Resumen de filtros activos */}
+              {hayFiltrosActivos && (
+                <div className="text-xs text-gray-500 pt-1">
+                  Mostrando <span className="font-semibold text-indigo-600">{candidatosFiltrados.length}</span> de {candidatos.length} candidatos
+                </div>
+              )}
             </div>
 
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
@@ -225,7 +314,12 @@ export default function DashboardPage() {
                 </div>
               ) : candidatosFiltrados.length === 0 ? (
                 <div className="p-12 text-center text-gray-400">
-                  No hay candidatos con los filtros aplicados.
+                  <p className="mb-2">No hay candidatos con los filtros aplicados.</p>
+                  {hayFiltrosActivos && (
+                    <button onClick={limpiarFiltros} className="text-indigo-600 text-sm hover:underline">
+                      Limpiar filtros
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -259,6 +353,9 @@ export default function DashboardPage() {
                               <div className="font-medium text-gray-900">{c.nombre_completo}</div>
                               <div className="text-gray-400 text-xs">{c.email}</div>
                               {c.ciudad && <div className="text-gray-400 text-xs">{c.ciudad}</div>}
+                              {c.notas && (
+                                <div className="text-amber-600 text-xs mt-0.5">📝 Tiene notas</div>
+                              )}
                             </td>
                             <td className="px-4 py-3 text-gray-600 text-xs">
                               {(c.vacantes as any)?.titulo || '—'}
@@ -448,10 +545,8 @@ function ModalVacante({
     e.preventDefault()
     setGuardando(true)
     setError('')
-
     const habilidades = form.habilidades_requeridas.split(',').map(h => h.trim()).filter(h => h.length > 0)
     const valores = form.valores_empresa.split(',').map(v => v.trim()).filter(v => v.length > 0)
-
     const datos = {
       titulo: form.titulo,
       descripcion: form.descripcion,
@@ -464,7 +559,6 @@ function ModalVacante({
       habilidades_requeridas: habilidades,
       valores_empresa: valores,
     }
-
     if (vacante) {
       const { error } = await supabase.from('vacantes').update(datos).eq('id', vacante.id)
       if (error) { setError('Error al actualizar: ' + error.message); setGuardando(false); return }
@@ -472,7 +566,6 @@ function ModalVacante({
       const { error } = await supabase.from('vacantes').insert({ ...datos, estado: 'activa' })
       if (error) { setError('Error al crear: ' + error.message); setGuardando(false); return }
     }
-
     onGuardada()
   }
 
@@ -490,25 +583,25 @@ function ModalVacante({
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Título del cargo *</label>
             <input name="titulo" required value={form.titulo} onChange={handleChange}
               placeholder="Ej: Desarrollador Full Stack"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Descripción *</label>
             <textarea name="descripcion" required value={form.descripcion} onChange={handleChange} rows={3}
               placeholder="Describe el cargo..."
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"/>
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"/>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Departamento</label>
               <input name="departamento" value={form.departamento} onChange={handleChange}
                 placeholder="Ej: Tecnología"
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Modalidad</label>
               <select name="modalidad" value={form.modalidad} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 <option value="presencial">Presencial</option>
                 <option value="remoto">Remoto</option>
                 <option value="hibrido">Híbrido</option>
@@ -520,25 +613,25 @@ function ModalVacante({
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Salario mínimo (COP)</label>
               <input name="salario_min" type="number" value={form.salario_min} onChange={handleChange}
                 placeholder="Ej: 3500000"
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Salario máximo (COP)</label>
               <input name="salario_max" type="number" value={form.salario_max} onChange={handleChange}
                 placeholder="Ej: 6000000"
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Experiencia mínima (años)</label>
               <input name="experiencia_minima" type="number" min="0" value={form.experiencia_minima} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Educación requerida</label>
               <select name="educacion_requerida" value={form.educacion_requerida} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 <option value="bachillerato">Bachillerato</option>
                 <option value="tecnico">Técnico</option>
                 <option value="tecnologo">Tecnólogo</option>
@@ -554,7 +647,7 @@ function ModalVacante({
             </label>
             <input name="habilidades_requeridas" value={form.habilidades_requeridas} onChange={handleChange}
               placeholder="Ej: Python, React, SQL, Git"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -562,7 +655,7 @@ function ModalVacante({
             </label>
             <input name="valores_empresa" value={form.valores_empresa} onChange={handleChange}
               placeholder="Ej: innovacion, trabajo_en_equipo"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
           </div>
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
@@ -603,6 +696,9 @@ function ModalCandidato({
   const ev = candidato.evaluaciones?.[0]
   const supabase = createClient()
   const [actualizando, setActualizando] = useState(false)
+  const [notas, setNotas] = useState(candidato.notas || '')
+  const [guardandoNota, setGuardandoNota] = useState(false)
+  const [notaGuardada, setNotaGuardada] = useState(false)
 
   const verCV = async () => {
     if (!candidato.cv_nombre_archivo) return
@@ -619,6 +715,15 @@ function ModalCandidato({
     onActualizado()
     onClose()
     setActualizando(false)
+  }
+
+  const guardarNota = async () => {
+    setGuardandoNota(true)
+    await supabase.from('candidatos').update({ notas }).eq('id', candidato.id)
+    setGuardandoNota(false)
+    setNotaGuardada(true)
+    setTimeout(() => setNotaGuardada(false), 2000)
+    onActualizado()
   }
 
   const ScoreBar = ({ label, value, color }: { label: string; value: number; color: string }) => (
@@ -646,6 +751,7 @@ function ModalCandidato({
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none ml-4">×</button>
         </div>
+
         <div className="p-6 space-y-6">
           {ev ? (
             <div className="bg-indigo-50 rounded-xl p-5">
@@ -680,12 +786,14 @@ function ModalCandidato({
               Este candidato aún no ha sido analizado por IA.
             </div>
           )}
+
           {ev?.alerta_sesgo && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <p className="text-sm font-medium text-amber-800">⚠️ Alerta de posible sesgo</p>
               <p className="text-xs text-amber-700 mt-1">Tipo detectado: {ev.tipo_sesgo_detectado}.</p>
             </div>
           )}
+
           {ev && (
             <>
               <div>
@@ -742,6 +850,34 @@ function ModalCandidato({
               </div>
             </>
           )}
+
+          {/* Notas del equipo RRHH */}
+          <div className="border-t border-gray-100 pt-5">
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">📝 Notas del equipo RRHH</h3>
+            <textarea
+              value={notas}
+              onChange={e => setNotas(e.target.value)}
+              rows={3}
+              placeholder="Agrega notas internas sobre este candidato..."
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900
+                         bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+            />
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-xs text-gray-400">
+                Estas notas son visibles solo para el equipo de RRHH
+              </span>
+              <button
+                onClick={guardarNota}
+                disabled={guardandoNota}
+                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400
+                           text-white rounded-lg text-xs font-medium transition-colors"
+              >
+                {notaGuardada ? '✓ Guardado' : guardandoNota ? 'Guardando...' : 'Guardar nota'}
+              </button>
+            </div>
+          </div>
+
+          {/* Acciones */}
           <div className="border-t border-gray-100 pt-5">
             <h3 className="text-sm font-semibold text-gray-700 mb-3">Actualizar estado manualmente</h3>
             <div className="flex flex-wrap gap-2">
