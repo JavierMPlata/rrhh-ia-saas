@@ -5,29 +5,30 @@ from app.routes import candidatos, auth
 
 app = FastAPI(
     title="RRHH-IA API",
-    description="Sistema de gestion de RRHH con IA para startups colombianas",
+    description="Sistema de gestión de personal con IA para la Universidad de San Buenaventura Bogotá",
     version="1.0.0"
 )
 
-# Orígenes permitidos
+# Orígenes permitidos — explícitos para no depender solo de variables de entorno
 origins = [
     "http://localhost:3000",
     "https://localhost:3000",
+    "https://rrhh-ia-saas.vercel.app",        # producción Vercel — explícito
+    "https://www.rrhh-ia-saas.vercel.app",     # con www por si acaso
 ]
 
-# Agregar FRONTEND_URL si está configurado
+# Agregar FRONTEND_URL de variable de entorno si existe y no está ya en la lista
 if hasattr(settings, 'FRONTEND_URL') and settings.FRONTEND_URL:
-    origins.append(settings.FRONTEND_URL)
-    # También agregar con y sin www
-    if settings.FRONTEND_URL.startswith('https://'):
-        origins.append(settings.FRONTEND_URL.replace('https://', 'https://www.'))
+    if settings.FRONTEND_URL not in origins:
+        origins.append(settings.FRONTEND_URL)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 app.include_router(candidatos.router, prefix="/api/candidatos", tags=["Candidatos"])
@@ -38,5 +39,6 @@ def health_check():
     return {
         "status": "ok",
         "service": "RRHH-IA API",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "origins_permitidos": origins
     }
