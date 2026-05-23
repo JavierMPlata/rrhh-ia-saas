@@ -30,20 +30,21 @@ function esPeligroso(valor: string): boolean {
   return PATRONES_PELIGROSOS.some(p => lower.includes(p.toLowerCase()))
 }
 
-// Limpia query params sospechosos al montar — evita que ZAP marque 200 OK
+/**
+ * Elimina TODOS los query params al montar.
+ *
+ * El formulario público es una SPA que no consume ningún parámetro de URL,
+ * por lo tanto cualquier query param es innecesario o es un intento de
+ * reflected parameter injection / XSS reflejado.
+ *
+ * Esto es consistente con el comportamiento de /dashboard/page.tsx.
+ */
 function limpiarURLSospechosa() {
   if (typeof window === 'undefined') return
   const url = new URL(window.location.href)
-  const camposSensibles = ['ciudad', 'email', 'nombre_completo', 'telefono', 'vacante_id']
-  let dirty = false
-  for (const campo of camposSensibles) {
-    const val = url.searchParams.get(campo)
-    if (val !== null) {
-      dirty = true
-      url.searchParams.delete(campo)
-    }
-  }
-  if (dirty) {
+
+  if (url.searchParams.toString().length > 0) {
+    url.search = ''
     window.history.replaceState({}, '', url.toString())
   }
 }
@@ -59,7 +60,7 @@ export default function FormularioPublico() {
   const [aceptaTratamiento, setAceptaTratamiento] = useState(false)
 
   useEffect(() => {
-    // Eliminar query params sensibles de la URL al cargar
+    // Eliminar TODOS los query params de la URL al cargar
     limpiarURLSospechosa()
 
     supabase.from('vacantes')

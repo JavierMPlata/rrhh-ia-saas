@@ -2,9 +2,14 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // ── Parámetros vigilados ───────────────────────────────────────────────────
+// Todos los parámetros del formulario público se validan explícitamente.
+// Además, urlTienePeligro() escanea TODOS los query params de cualquier ruta.
 const PARAMETROS_VIGILADOS = [
   'ciudad', 'nombre_completo', 'telefono', 'email', 'vacante_id',
 ]
+
+// Regex UUID v4 estricto: vacante_id debe ser UUID válido o string vacío
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const PATRONES_PELIGROSOS = [
   // Path traversal
@@ -17,19 +22,15 @@ const PATRONES_PELIGROSOS = [
   'javascript:', 'vbscript:', 'data:text', 'data:image/svg',
 
   // XML / XPath injection
-  '<!--',       // cubre tanto <!--# (SSI) como <!-- (XML)
-  ']]>',        // cierre de sección CDATA — XPath/XML injection
+  '<!--',
+  ']]>',
   '<!entity',
   '<!doctype',
 
   // Template injection
   '{{', '}}', '${', '#{', '<%', '%>',
-  '{#',         // FreeMarker #{...}
-  '{@',         // Velocity/Spring @math, @twig
-
-  // SSTI numérico — patrón zj+N*N+zj y zj{N*N}zj
-  // Se detecta por la presencia del marcador 'zj' con operaciones aritméticas
-  // Manejado aparte en la función esValorPeligroso()
+  '{#',
+  '{@',
 
   // SSI injection
   '#exec', '#include',
@@ -38,8 +39,11 @@ const PATRONES_PELIGROSOS = [
   ' union ', ' or 1', ' and 1',
   "'--", ';--', '" or "', "' or '",
   'drop table', 'insert into', 'select *',
-  // SQL blind sin comilla previa
   ' and 1=', ' or 1=',
+  // SQL boolean-based blind (ZAP probe patterns)
+  ' and 1=1', ' and 1=2', ' or 1=1',
+  'union all select', 'union all ',
+  '+and+', '+or+', '+union+',
 
   // Open redirect / SSRF con protocolo
   'http://', 'https://', 'ftp://', '://',
@@ -61,7 +65,6 @@ const PATRONES_PELIGROSOS = [
 ]
 
 // Caracteres individuales que son suficientes para bloquear en query params
-// (no en el body del formulario, solo como query params en GET)
 const CHARS_PELIGROSOS = [
   "'",    // comilla simple — SQL injection
   '"',    // comilla doble — SQL / XSS
@@ -109,9 +112,6 @@ function decodeSafe(valor: string): string {
 }
 
 function esSSTI(decoded: string): boolean {
-  // Patrón SSTI: marcador zj con aritmética — zj+N*N+zj, zj{N*N}zj
-  // También cubre: zj{#N*N}zj (FreeMarker), zj{@N*N}zj (Velocity/Twig)
-  // y {@math key="N" method="multiply" operand="N"/} (Velocity)
   if (/zj[\s+{][\d#@]/.test(decoded)) return true
   if (/zj\s*\*\s*\d/.test(decoded)) return true
   if (/\{@math\s+key=/i.test(decoded)) return true
@@ -142,15 +142,32 @@ function esValorPeligroso(valor: string): boolean {
   return false
 }
 
+/**
+ * Valida el parámetro vacante_id: si está presente y no vacío, debe ser UUID v4.
+ * Esto bloquea payloads como "thishouldnotexistandhopefullyitwillnot" o "0W45pz4p".
+ */
+function esVacanteIdInvalido(valor: string | null): boolean {
+  if (!valor || valor === '') return false
+  return !UUID_REGEX.test(valor)
+}
+
 function urlTienePeligro(request: NextRequest): boolean {
   const params = request.nextUrl.searchParams
 
+  // Si no hay query params, no hay nada que validar
+  if (!params.toString()) return false
+
+  // Validación específica de vacante_id: debe ser UUID válido o vacío
+  if (esVacanteIdInvalido(params.get('vacante_id'))) return true
+
+  // Revisar parámetros vigilados explícitamente
   for (const param of PARAMETROS_VIGILADOS) {
     const valor = params.get(param)
     if (valor && esValorPeligroso(valor)) return true
   }
 
-  // Revisar TODOS los query params (cubre favicon y params arbitrarios)
+  // Revisar TODOS los query params — cubre favicon.ico y params arbitrarios
+  // Esto bloquea ataques como /favicon.ico?favicon.0x3d=+AND+1%3D1+--+
   for (const [, val] of params.entries()) {
     if (esValorPeligroso(val)) return true
   }
@@ -171,6 +188,7 @@ function forbidden(): NextResponse {
 // ── Middleware principal ───────────────────────────────────────────────────
 export async function middleware(request: NextRequest) {
   // 1. Bloquear inyecciones en query params — 403 real con security headers
+  //    Se aplica a TODAS las rutas, incluidas /favicon.ico, /_next/*, etc.
   if (urlTienePeligro(request)) {
     return forbidden()
   }
@@ -245,6 +263,9 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image).*)',
+    // Aplica a TODAS las rutas, incluyendo favicon.ico y archivos estáticos.
+    // La excepción de _next/static y _next/image se elimina intencionalmente
+    // para que los query params en esas rutas también sean validados.
+    '/(.*)',
   ],
 }
