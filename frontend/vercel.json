@@ -39,6 +39,14 @@
     }
   ],
   "redirects": [
+    
+    {
+    "source": "/favicon.ico",
+    "has": [{ "type": "query", "key": "favicon.0x3dzn~oxb6tn.ico" }],
+    "destination": "/favicon.ico",
+    "permanent": false
+    },
+
     {
       "source": "/",
       "has": [{ "type": "query", "key": "ciudad" }],
