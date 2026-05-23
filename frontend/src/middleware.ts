@@ -1,24 +1,51 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-// ── Parámetros que ZAP/scanners intentan inyectar ──────────────────────────
+// ── Parámetros vigilados ───────────────────────────────────────────────────
 const PARAMETROS_VIGILADOS = [
   'ciudad', 'nombre_completo', 'telefono', 'email', 'vacante_id',
 ]
 
 const PATRONES_PELIGROSOS = [
-  '../', '..\\',
-  '/etc/', 'c:\\', 'c:/',
+  // Path traversal
+  '../', '..\\', '/etc/', 'c:\\', 'c:/',
   'system.ini', 'win.ini', 'web-inf',
-  '<script', '<img', '<svg',
-  'onerror', 'onload', 'onclick',
-  'javascript:', 'vbscript:', 'data:text',
-  '{{', '${', '#{', '<%',
+  // Slash sola (path traversal relativo)
+  // Se evalúa aparte: valor exacto '/' o que empiece por '/'
+  // XSS / HTML injection
+  '<script', '<img', '<svg', '<iframe', '<object', '<embed',
+  'onerror', 'onload', 'onclick', 'onmouseover', 'onfocus',
+  'javascript:', 'vbscript:', 'data:text', 'data:image/svg',
+  // Template injection
+  '{{', '}}', '${', '#{', '<%', '%>',
+  // SSI injection
   '<!--#', '#exec', '#include',
-  ' union ', ' or 1', ' and 1', "'--", ';--',
-  'http://', 'https://', '://',
+  // SQL injection
+  ' union ', ' or 1', ' and 1', "'--", ';--', '" or "', "' or '",
+  'drop table', 'insert into', 'select *',
+  // Open redirect / SSRF — con protocolo
+  'http://', 'https://', 'ftp://', '://',
+  // www. sin protocolo (open redirect probe)
+  'www.',
+  // Null bytes
   '%00', '\x00',
-  'alert(', 'prompt(', 'confirm(',
+  // Otros
+  'alert(', 'prompt(', 'confirm(', 'eval(',
+]
+
+// Dominios de callback SSRF (owasp, burp, interactsh, etc.)
+const DOMINIOS_SSRF = [
+  '.owasp.org',
+  '.burpcollaborator.net',
+  '.interact.sh',
+  '.canarytokens.com',
+  '.ngrok.io',
+  '.ngrok-free.app',
+  'localtest.me',
+  '169.254.',   // AWS metadata IP
+  '127.',        // localhost
+  '0.0.0.0',
+  '::1',
 ]
 
 const SECURITY_HEADERS = {
@@ -41,11 +68,23 @@ const SECURITY_HEADERS = {
   ].join('; '),
 }
 
-function esPeligroso(valor: string): boolean {
-  const decoded = (() => {
-    try { return decodeURIComponent(valor) } catch { return valor }
-  })().toLowerCase()
-  return PATRONES_PELIGROSOS.some(p => decoded.includes(p.toLowerCase()))
+function decodeSafe(valor: string): string {
+  try { return decodeURIComponent(valor) } catch { return valor }
+}
+
+function esValorPeligroso(valor: string): boolean {
+  const decoded = decodeSafe(valor).toLowerCase().trim()
+
+  // Valor exactamente '/' o que empiece con '/' (path traversal relativo)
+  if (decoded === '/' || decoded.startsWith('/')) return true
+
+  // Patrones textuales
+  if (PATRONES_PELIGROSOS.some(p => decoded.includes(p.toLowerCase()))) return true
+
+  // Dominios de callback SSRF
+  if (DOMINIOS_SSRF.some(d => decoded.includes(d.toLowerCase()))) return true
+
+  return false
 }
 
 function urlTienePeligro(request: NextRequest): boolean {
@@ -54,12 +93,12 @@ function urlTienePeligro(request: NextRequest): boolean {
   // Revisar parámetros sensibles conocidos
   for (const param of PARAMETROS_VIGILADOS) {
     const valor = params.get(param)
-    if (valor && esPeligroso(valor)) return true
+    if (valor && esValorPeligroso(valor)) return true
   }
 
   // Revisar TODOS los query params (cubre favicon y params arbitrarios)
   for (const [, val] of params.entries()) {
-    if (esPeligroso(val)) return true
+    if (esValorPeligroso(val)) return true
   }
 
   return false
@@ -75,7 +114,7 @@ function forbidden(): NextResponse {
   })
 }
 
-// ── Middleware principal ────────────────────────────────────────────────────
+// ── Middleware principal ───────────────────────────────────────────────────
 export async function middleware(request: NextRequest) {
   // 1. Bloquear inyecciones en query params — 403 real con security headers
   if (urlTienePeligro(request)) {
@@ -154,8 +193,7 @@ export const config = {
   matcher: [
     /*
      * Aplica a todas las rutas excepto assets estáticos de Next.js.
-     * Esto garantiza que el bloqueo de inyecciones cubra también /favicon.ico
-     * y cualquier otra ruta que ZAP intente usar como vector.
+     * Cubre /favicon.ico y cualquier otra ruta usada como vector de ataque.
      */
     '/((?!_next/static|_next/image).*)',
   ],
