@@ -33,5 +33,67 @@
         }
       ]
     }
+  ],
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "query",
+          "key": "ciudad",
+          "value": "(?i).*(\\.\\.[\\/\\\\]|c:\\\\|c:\\/|\\/etc\\/|web-inf|system\\.ini|win\\.ini).*"
+        }
+      ],
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "query",
+          "key": "email",
+          "value": "(?i).*(\\.\\.[\\/\\\\]|c:\\\\|c:\\/|\\/etc\\/|web-inf|system\\.ini|win\\.ini).*"
+        }
+      ],
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "query",
+          "key": "nombre_completo",
+          "value": "(?i).*(\\.\\.[\\/\\\\]|c:\\\\|c:\\/|\\/etc\\/|web-inf|system\\.ini|win\\.ini).*"
+        }
+      ],
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "query",
+          "key": "telefono",
+          "value": "(?i).*(\\.\\.[\\/\\\\]|c:\\\\|c:\\/|\\/etc\\/|web-inf|system\\.ini|win\\.ini).*"
+        }
+      ],
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "query",
+          "key": "vacante_id",
+          "value": "(?i).*(\\.\\.[\\/\\\\]|c:\\\\|c:\\/|\\/etc\\/|web-inf|<|\\{\\{|\\$\\{|\\#\\{).*"
+        }
+      ],
+      "destination": "/",
+      "permanent": false
+    }
   ]
 }
