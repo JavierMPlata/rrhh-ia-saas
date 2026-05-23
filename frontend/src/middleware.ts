@@ -1,16 +1,14 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-// ── Rutas SPA que NO deben recibir ningún query param ─────────────────────
-// Cualquier request a estas rutas con query params es sospechoso y se bloquea
-// con un redirect limpio (sin 403, para no revelar info al atacante).
-const RUTAS_SPA_SIN_PARAMS = ['/', '/privacidad', '/eliminar-datos']
-
-// Patrones vigilados — se inspeccionan en rutas que SÍ pueden tener params
+// ── Parámetros vigilados ───────────────────────────────────────────────────
+// Todos los parámetros del formulario público se validan explícitamente.
+// Además, urlTienePeligro() escanea TODOS los query params de cualquier ruta.
 const PARAMETROS_VIGILADOS = [
   'ciudad', 'nombre_completo', 'telefono', 'email', 'vacante_id',
 ]
 
+// Regex UUID v4 estricto: vacante_id debe ser UUID válido o string vacío
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const PATRONES_PELIGROSOS = [
@@ -37,17 +35,19 @@ const PATRONES_PELIGROSOS = [
   // SSI injection
   '#exec', '#include',
 
-  // SQL injection
+  // SQL injection — palabras clave y operadores
   ' union ', ' or 1', ' and 1',
   "'--", ';--', '" or "', "' or '",
   'drop table', 'insert into', 'select *',
   ' and 1=', ' or 1=',
+  // SQL boolean-based blind (ZAP probe patterns)
   ' and 1=1', ' and 1=2', ' or 1=1',
   'union all select', 'union all ',
   '+and+', '+or+', '+union+',
 
-  // Open redirect / SSRF
+  // Open redirect / SSRF con protocolo
   'http://', 'https://', 'ftp://', '://',
+  // Open redirect sin protocolo
   'www.',
 
   // Null bytes
@@ -56,7 +56,7 @@ const PATRONES_PELIGROSOS = [
   // Misc
   'alert(', 'prompt(', 'confirm(', 'eval(',
 
-  // Command injection probes
+  // Command injection probes comunes de ZAP/Burp
   'get-help',
   ';get-help',
   '|get-help',
@@ -64,8 +64,15 @@ const PATRONES_PELIGROSOS = [
   '$(get-help)',
 ]
 
-const CHARS_PELIGROSOS = ["'", '"', ';', '`']
+// Caracteres individuales que son suficientes para bloquear en query params
+const CHARS_PELIGROSOS = [
+  "'",    // comilla simple — SQL injection
+  '"',    // comilla doble — SQL / XSS
+  ';',    // punto y coma — SQL / command injection
+  '`',    // backtick — command injection
+]
 
+// Dominios de callback SSRF
 const DOMINIOS_SSRF = [
   '.owasp.org',
   '.burpcollaborator.net',
@@ -115,56 +122,57 @@ function esValorPeligroso(valor: string): boolean {
   const decoded = decodeSafe(valor).trim()
   const decodedLower = decoded.toLowerCase()
 
+  // Valor exactamente '/' o que empiece con '/' (path traversal relativo)
   if (decoded === '/' || decoded.startsWith('/')) return true
 
+  // Caracteres peligrosos solos o en combinación simple
   for (const ch of CHARS_PELIGROSOS) {
     if (decoded.includes(ch)) return true
   }
 
+  // SSTI — detección por patrón de marcador aritmético
   if (esSSTI(decoded)) return true
 
+  // Patrones textuales de la lista
   if (PATRONES_PELIGROSOS.some(p => decodedLower.includes(p.toLowerCase()))) return true
 
+  // Dominios de callback SSRF
   if (DOMINIOS_SSRF.some(d => decodedLower.includes(d.toLowerCase()))) return true
 
   return false
 }
 
+/**
+ * Valida el parámetro vacante_id: si está presente y no vacío, debe ser UUID v4.
+ * Esto bloquea payloads como "thishouldnotexistandhopefullyitwillnot" o "0W45pz4p".
+ */
 function esVacanteIdInvalido(valor: string | null): boolean {
   if (!valor || valor === '') return false
   return !UUID_REGEX.test(valor)
 }
 
-/**
- * Devuelve true si la URL contiene query params sospechosos.
- * Solo se usa en rutas que SÍ pueden aceptar params (login con ?error=).
- */
 function urlTienePeligro(request: NextRequest): boolean {
   const params = request.nextUrl.searchParams
+
+  // Si no hay query params, no hay nada que validar
   if (!params.toString()) return false
 
+  // Validación específica de vacante_id: debe ser UUID válido o vacío
   if (esVacanteIdInvalido(params.get('vacante_id'))) return true
 
+  // Revisar parámetros vigilados explícitamente
   for (const param of PARAMETROS_VIGILADOS) {
     const valor = params.get(param)
     if (valor && esValorPeligroso(valor)) return true
   }
 
+  // Revisar TODOS los query params — cubre favicon.ico y params arbitrarios
+  // Esto bloquea ataques como /favicon.ico?favicon.0x3d=+AND+1%3D1+--+
   for (const [, val] of params.entries()) {
     if (esValorPeligroso(val)) return true
   }
 
   return false
-}
-
-/**
- * Elimina los query params de la URL haciendo un redirect limpio (301).
- * Preferimos redirect sobre 403 en rutas SPA para no filtrar información.
- */
-function stripQueryParams(request: NextRequest): NextResponse {
-  const url = request.nextUrl.clone()
-  url.search = ''
-  return NextResponse.redirect(url, { status: 301, headers: SECURITY_HEADERS })
 }
 
 function forbidden(): NextResponse {
@@ -179,35 +187,12 @@ function forbidden(): NextResponse {
 
 // ── Middleware principal ───────────────────────────────────────────────────
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl
-  const tieneQueryParams = request.nextUrl.searchParams.toString().length > 0
-
-  // 1. Rutas SPA que NUNCA usan query params → redirect limpio al path base
-  //    Esto cubre el probe de ZAP: /?ciudad=ZAP&email=...&nombre_completo=ZAP
-  //    y cualquier intento de reflected parameter injection.
-  if (RUTAS_SPA_SIN_PARAMS.includes(pathname) && tieneQueryParams) {
-    return stripQueryParams(request)
-  }
-
-  // 2. Archivos estáticos / favicon con query params → redirect limpio
-  //    Cubre el probe: /favicon.ico?favicon.0x3d=...
-  const esEstatico =
-    pathname.startsWith('/_next/') ||
-    pathname === '/favicon.ico' ||
-    pathname.endsWith('.woff2') ||
-    pathname.endsWith('.css') ||
-    pathname.endsWith('.js')
-
-  if (esEstatico && tieneQueryParams) {
-    return stripQueryParams(request)
-  }
-
-  // 3. Para el resto de rutas, inspeccionar el contenido de los params
-  if (tieneQueryParams && urlTienePeligro(request)) {
+  // 1. Bloquear inyecciones en query params — 403 real con security headers
+  //    Se aplica a TODAS las rutas, incluidas /favicon.ico, /_next/*, etc.
+  if (urlTienePeligro(request)) {
     return forbidden()
   }
 
-  // ── Autenticación Supabase ─────────────────────────────────────────────
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -232,46 +217,44 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
 
   // Sin sesión intentando entrar al dashboard → redirigir al login
-  if (pathname.startsWith('/dashboard') && !user) {
+  if (request.nextUrl.pathname.startsWith('/dashboard') && !user) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
-    url.search = ''
     return NextResponse.redirect(url)
   }
 
   // Si tiene sesión, verificar que el usuario esté activo
-  if (pathname.startsWith('/dashboard') && user) {
+  if (request.nextUrl.pathname.startsWith('/dashboard') && user) {
     const { data: perfil } = await supabase
       .from('perfiles_usuario')
       .select('activo, rol')
       .eq('user_id', user.id)
       .single()
 
+    // Si el perfil existe y está inactivo → cerrar sesión y redirigir
     if (perfil && !perfil.activo) {
       await supabase.auth.signOut()
       const url = request.nextUrl.clone()
       url.pathname = '/login'
-      url.search = ''
       url.searchParams.set('error', 'cuenta_inactiva')
       return NextResponse.redirect(url)
     }
 
+    // Si intenta ir a /admin sin ser admin → redirigir al dashboard
     if (
-      pathname.startsWith('/dashboard/admin') &&
+      request.nextUrl.pathname.startsWith('/dashboard/admin') &&
       perfil?.rol !== 'admin'
     ) {
       const url = request.nextUrl.clone()
       url.pathname = '/dashboard'
-      url.search = ''
       return NextResponse.redirect(url)
     }
   }
 
   // Ya logueado intentando ir al login → redirigir al dashboard
-  if (pathname === '/login' && user) {
+  if (request.nextUrl.pathname === '/login' && user) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
-    url.search = ''
     return NextResponse.redirect(url)
   }
 
@@ -280,6 +263,9 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    // Aplica a TODAS las rutas, incluyendo favicon.ico y archivos estáticos.
+    // La excepción de _next/static y _next/image se elimina intencionalmente
+    // para que los query params en esas rutas también sean validados.
     '/(.*)',
   ],
 }
