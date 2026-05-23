@@ -5,6 +5,14 @@ import type { Vacante } from '@/lib/supabase'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const TELEFONO_REGEX = /^[0-9+\-\s]{7,15}$/
+const PATRONES_PELIGROSOS = ['../', '..\\', '/etc/', 'c:\\', 'c:/', 'system.ini', 'win.ini', 'web-inf', '<', '{%', '{{', '${', '#{']
+
+function esPeligroso(valor: string): boolean {
+  return PATRONES_PELIGROSOS.some(p => valor.toLowerCase().includes(p.toLowerCase()))
+}
+
 export default function FormularioPublico() {
   const supabase = createClient()
   const [vacantes, setVacantes] = useState<Vacante[]>([])
@@ -12,6 +20,10 @@ export default function FormularioPublico() {
   const [enviado, setEnviado] = useState(false)
   const [error, setError] = useState('')
   const [archivo, setArchivo] = useState<File | null>(null)
+
+  // Checkboxes controlados — booleanos puros, no strings
+  const [aceptaTerminos, setAceptaTerminos] = useState(false)
+  const [aceptaTratamiento, setAceptaTratamiento] = useState(false)
 
   useEffect(() => {
     supabase.from('vacantes')
@@ -27,13 +39,59 @@ export default function FormularioPublico() {
     setLoading(true)
     setError('')
 
+    const form = e.currentTarget
+    const nombreCompleto = (form.elements.namedItem('nombre_completo') as HTMLInputElement).value.trim()
+    const email = (form.elements.namedItem('email') as HTMLInputElement).value.trim()
+    const telefono = (form.elements.namedItem('telefono') as HTMLInputElement).value.trim()
+    const ciudad = (form.elements.namedItem('ciudad') as HTMLInputElement).value.trim()
+    const vacanteId = (form.elements.namedItem('vacante_id') as HTMLSelectElement).value.trim()
+
+    // Validar checkboxes — deben ser true booleano
+    if (!aceptaTerminos || !aceptaTratamiento) {
+      setError('Debes aceptar los términos y el tratamiento de datos personales')
+      setLoading(false)
+      return
+    }
+
+    // Validar archivo
     if (!archivo) {
       setError('Por favor adjunta tu hoja de vida (PDF o Word)')
       setLoading(false)
       return
     }
 
-    const formData = new FormData(e.currentTarget)
+    // Validar inputs contra path traversal e inyección
+    for (const [campo, valor] of [['Nombre', nombreCompleto], ['Ciudad', ciudad]]) {
+      if (esPeligroso(valor)) {
+        setError(`El campo ${campo} contiene caracteres no permitidos`)
+        setLoading(false)
+        return
+      }
+    }
+
+    // Validar teléfono
+    if (telefono && !TELEFONO_REGEX.test(telefono)) {
+      setError('El teléfono solo puede contener números, espacios, + y -')
+      setLoading(false)
+      return
+    }
+
+    // Validar vacante_id — debe ser UUID válido o vacío
+    if (vacanteId && !UUID_REGEX.test(vacanteId)) {
+      setError('La vacante seleccionada no es válida')
+      setLoading(false)
+      return
+    }
+
+    // Construir FormData con booleanos explícitos — no strings
+    const formData = new FormData()
+    formData.append('nombre_completo', nombreCompleto)
+    formData.append('email', email)
+    formData.append('telefono', telefono)
+    formData.append('ciudad', ciudad)
+    formData.append('vacante_id', vacanteId)
+    formData.append('acepta_terminos', 'true')          // siempre string "true" validado arriba
+    formData.append('acepta_tratamiento_datos', 'true') // siempre string "true" validado arriba
     formData.append('cv', archivo)
 
     try {
@@ -44,8 +102,9 @@ export default function FormularioPublico() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Error al enviar tu aplicación')
       setEnviado(true)
-    } catch (err: any) {
-      setError(err.message || 'Ocurrió un error. Por favor intenta de nuevo.')
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Ocurrió un error. Por favor intenta de nuevo.'
+      setError(message)
     } finally {
       setLoading(false)
     }
@@ -90,7 +149,7 @@ export default function FormularioPublico() {
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6">
-          
+
           {/* Datos personales */}
           <div>
             <h2 className="text-base font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-100">
@@ -105,6 +164,7 @@ export default function FormularioPublico() {
                   name="nombre_completo"
                   type="text"
                   required
+                  maxLength={100}
                   placeholder="Ej: María García López"
                   className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
@@ -117,6 +177,7 @@ export default function FormularioPublico() {
                   name="email"
                   type="email"
                   required
+                  maxLength={100}
                   placeholder="tu@email.com"
                   className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
@@ -128,6 +189,7 @@ export default function FormularioPublico() {
                 <input
                   name="telefono"
                   type="tel"
+                  maxLength={15}
                   placeholder="+57 300 123 4567"
                   className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
@@ -139,6 +201,7 @@ export default function FormularioPublico() {
                 <input
                   name="ciudad"
                   type="text"
+                  maxLength={60}
                   placeholder="Bogotá"
                   className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
@@ -197,17 +260,17 @@ export default function FormularioPublico() {
             </div>
           </div>
 
-          {/* Consentimiento Ley 1581/2012 */}
+          {/* Consentimiento Ley 1581/2012 — checkboxes controlados */}
           <div className="bg-blue-50 rounded-xl p-5 space-y-3">
             <h3 className="text-sm font-semibold text-blue-900">
               Tratamiento de datos personales — Ley 1581 de 2012
             </h3>
             <label className="flex items-start gap-3 cursor-pointer">
               <input
-                name="acepta_terminos"
                 type="checkbox"
+                checked={aceptaTerminos}
+                onChange={(e) => setAceptaTerminos(e.target.checked)}
                 required
-                value="true"
                 className="mt-0.5 h-4 w-4 text-indigo-600 border-gray-300 rounded"
               />
               <span className="text-xs text-blue-800">
@@ -217,10 +280,10 @@ export default function FormularioPublico() {
             </label>
             <label className="flex items-start gap-3 cursor-pointer">
               <input
-                name="acepta_tratamiento_datos"
                 type="checkbox"
+                checked={aceptaTratamiento}
+                onChange={(e) => setAceptaTratamiento(e.target.checked)}
                 required
-                value="true"
                 className="mt-0.5 h-4 w-4 text-indigo-600 border-gray-300 rounded"
               />
               <span className="text-xs text-blue-800">
@@ -249,7 +312,7 @@ export default function FormularioPublico() {
 
           <button
             type="submit"
-            disabled={loading || !archivo}
+            disabled={loading || !archivo || !aceptaTerminos || !aceptaTratamiento}
             className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300
                        text-white font-medium py-3 px-4 rounded-xl text-sm
                        transition-colors flex items-center justify-center gap-2"

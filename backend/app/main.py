@@ -1,23 +1,31 @@
 ﻿from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from app.config import settings
 from app.routes import candidatos, auth
 
+# CORREGIDO: app se crea primero, luego se configura el limiter
 app = FastAPI(
     title="RRHH-IA API",
     description="Sistema de gestión de personal con IA para la Universidad de San Buenaventura Bogotá",
     version="1.0.0"
 )
 
+# Rate limiting global
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Orígenes permitidos — explícitos para no depender solo de variables de entorno
 origins = [
     "http://localhost:3000",
     "https://localhost:3000",
-    "https://rrhh-ia-saas.vercel.app",        # producción Vercel — explícito
-    "https://www.rrhh-ia-saas.vercel.app",     # con www por si acaso
+    "https://rrhh-ia-saas.vercel.app",
+    "https://www.rrhh-ia-saas.vercel.app",
 ]
 
-# Agregar FRONTEND_URL de variable de entorno si existe y no está ya en la lista
 if hasattr(settings, 'FRONTEND_URL') and settings.FRONTEND_URL:
     if settings.FRONTEND_URL not in origins:
         origins.append(settings.FRONTEND_URL)

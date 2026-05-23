@@ -1,20 +1,66 @@
 import re
 import base64
 import httpx
+import secrets
 from datetime import datetime
-from fastapi import APIRouter, File, UploadFile, Form, HTTPException, Request
+from fastapi import APIRouter, File, UploadFile, Form, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
 from pydantic import EmailStr
 from typing import Optional
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from app.database import supabase
 from app.config import settings
 from app.services.ia_service import extraer_texto_cv
-from app.routes.auth import get_current_user, TokenPayload
-from fastapi import Depends
+from app.routes.auth import get_current_user
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
+
+UUID_REGEX = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    re.IGNORECASE
+)
+TELEFONO_REGEX = re.compile(r'^[0-9+\-\s]{7,15}$')
+PATRONES_PELIGROSOS = [
+    '../', '..\\', '/etc/', 'c:\\', 'c:/', 'system.ini',
+    'win.ini', 'web-inf', '<script', '{{', '${', '#{', '<%'
+]
+TIPOS_PERMITIDOS = [
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+]
+
+
+def es_peligroso(valor: str) -> bool:
+    valor_lower = valor.lower()
+    return any(p.lower() in valor_lower for p in PATRONES_PELIGROSOS)
+
+
+def validar_campos_texto(nombre_completo: str, ciudad: str) -> None:
+    if es_peligroso(nombre_completo):
+        raise HTTPException(status_code=400, detail="El nombre contiene caracteres no permitidos")
+    if ciudad and es_peligroso(ciudad):
+        raise HTTPException(status_code=400, detail="La ciudad contiene caracteres no permitidos")
+    if len(nombre_completo) > 100:
+        raise HTTPException(status_code=400, detail="El nombre es demasiado largo")
+    if ciudad and len(ciudad) > 60:
+        raise HTTPException(status_code=400, detail="La ciudad es demasiado larga")
+
+
+def validar_telefono(telefono: str) -> None:
+    if telefono and not TELEFONO_REGEX.match(telefono):
+        raise HTTPException(status_code=400, detail="Teléfono inválido")
+
+
+def validar_vacante_id(vacante_id: Optional[str]) -> None:
+    if vacante_id and not UUID_REGEX.match(vacante_id):
+        raise HTTPException(status_code=400, detail="vacante_id inválido")
+
 
 @router.post("/aplicar")
+@limiter.limit("10/minute")
 async def aplicar_vacante(
     request: Request,
     nombre_completo: str = Form(...),
@@ -26,35 +72,37 @@ async def aplicar_vacante(
     acepta_tratamiento_datos: bool = Form(...),
     cv: UploadFile = File(...)
 ):
+    # Validar consentimiento
     if not acepta_terminos or not acepta_tratamiento_datos:
         raise HTTPException(
             status_code=400,
             detail="Debes aceptar los términos y el tratamiento de datos"
         )
 
-    tipos_permitidos = [
-        "application/pdf",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    ]
-    if cv.content_type not in tipos_permitidos:
+    # Validar inputs contra inyección y path traversal
+    validar_campos_texto(nombre_completo, ciudad)
+    validar_telefono(telefono)
+    validar_vacante_id(vacante_id)
+
+    # Validar tipo MIME del CV
+    if cv.content_type not in TIPOS_PERMITIDOS:
         raise HTTPException(
             status_code=400,
             detail="Solo se aceptan archivos PDF o Word (.docx)"
         )
 
-    existing = supabase.table("candidatos").select("id").eq(
-        "email", email
-    ).execute()
+    # Validar duplicado por email
+    existing = supabase.table("candidatos").select("id").eq("email", email).execute()
     if existing.data:
         raise HTTPException(
             status_code=409,
             detail="Ya existe una aplicación con este correo electrónico."
         )
 
+    # Validar tamaño del CV
     cv_content = await cv.read()
     if len(cv_content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="El archivo no debe superar 10MB")
+        raise HTTPException(status_code=413, detail="El archivo no debe superar 10 MB")
 
     extension = cv.filename.split('.')[-1] if cv.filename else 'pdf'
     timestamp = int(datetime.now().timestamp())
@@ -67,10 +115,9 @@ async def aplicar_vacante(
     )
 
     cv_url = f"{settings.SUPABASE_URL}/storage/v1/object/cvs/{nombre_archivo_storage}"
-
     texto_cv = extraer_texto_cv(cv_content, cv.content_type)
-
     ip_cliente = request.client.host if request.client else None
+
     candidato_data = {
         "nombre_completo": nombre_completo.strip(),
         "email": email.lower(),
@@ -113,13 +160,8 @@ async def aplicar_vacante(
 def limpiar_texto_cv(texto: str) -> str:
     if not texto:
         return ""
-    texto = texto.replace('\r\n', ' ')
-    texto = texto.replace('\n', ' ')
-    texto = texto.replace('\r', ' ')
-    texto = texto.replace('\t', ' ')
-    texto = texto.replace('"', ' ')
-    texto = texto.replace("'", ' ')
-    texto = texto.replace('\\', ' ')
+    texto = texto.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
+    texto = texto.replace('\t', ' ').replace('"', ' ').replace("'", ' ').replace('\\', ' ')
     texto = re.sub(r'https?://\S+', '', texto)
     texto = re.sub(r'www\.\S+', '', texto)
     texto = ''.join(c for c in texto if ord(c) >= 32)
@@ -135,12 +177,11 @@ async def disparar_webhook_n8n(
     cv_texto: str,
     cv_url: str
 ):
-    webhook_url = settings.N8N_WEBHOOK_URL if hasattr(settings, 'N8N_WEBHOOK_URL') else ""
+    webhook_url = getattr(settings, 'N8N_WEBHOOK_URL', '')
     if not webhook_url:
         print("Warning: N8N_WEBHOOK_URL no configurado")
         return
 
-    # Obtener datos de la vacante desde Supabase
     datos_vacante = {}
     if vacante_id:
         try:
@@ -152,7 +193,6 @@ async def disparar_webhook_n8n(
         except Exception as e:
             print(f"Warning: No se pudieron obtener datos de la vacante: {e}")
 
-    # Limpiar y encodear el CV en Base64
     cv_texto_limpio = limpiar_texto_cv(cv_texto)
     cv_texto_b64 = base64.b64encode(cv_texto_limpio.encode('utf-8')).decode('utf-8')
 
@@ -165,7 +205,7 @@ async def disparar_webhook_n8n(
         "cv_texto_encoded": True,
         "cv_url": cv_url,
         "timestamp": datetime.now().isoformat(),
-        "secreto": settings.N8N_WEBHOOK_SECRET,
+        # CORREGIDO: el secreto va en el header, nunca en el payload
         "vacante_titulo": datos_vacante.get("titulo", ""),
         "vacante_descripcion": datos_vacante.get("descripcion", ""),
         "vacante_habilidades": datos_vacante.get("habilidades_requeridas", []),
@@ -176,8 +216,16 @@ async def disparar_webhook_n8n(
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            await client.post(webhook_url, json=payload)
-            print(f"✅ Webhook n8n disparado para candidato {candidato_id}")
+            await client.post(
+                webhook_url,
+                json=payload,
+                headers={
+                    # CORREGIDO: secreto en header HTTP, no en el body
+                    "X-Webhook-Secret": settings.N8N_WEBHOOK_SECRET,
+                    "Content-Type": "application/json"
+                }
+            )
+            print(f"Webhook n8n disparado para candidato {candidato_id}")
     except Exception as e:
         print(f"Warning: No se pudo contactar n8n: {e}")
 
@@ -189,6 +237,18 @@ def listar_candidatos(
     limit: int = 50,
     offset: int = 0
 ):
+    # Validar parámetros de query
+    estados_validos = [
+        "recibido", "en_proceso", "analizado",
+        "preseleccionado", "descartado", "banco_talentos"
+    ]
+    if estado and estado not in estados_validos:
+        raise HTTPException(status_code=400, detail="Estado inválido")
+    if vacante_id and not UUID_REGEX.match(vacante_id):
+        raise HTTPException(status_code=400, detail="vacante_id inválido")
+    if limit > 100:
+        limit = 100
+
     query = supabase.table("candidatos").select(
         "*, evaluaciones(*), vacantes(titulo, departamento)"
     )
@@ -205,6 +265,10 @@ def listar_candidatos(
 
 @router.patch("/{candidato_id}/estado", dependencies=[Depends(get_current_user)])
 def actualizar_estado(candidato_id: str, nuevo_estado: str):
+    # Validar UUID del candidato
+    if not UUID_REGEX.match(candidato_id):
+        raise HTTPException(status_code=400, detail="candidato_id inválido")
+
     estados_validos = [
         "recibido", "en_proceso", "analizado",
         "preseleccionado", "descartado", "banco_talentos"
