@@ -10,30 +10,66 @@ const PATRONES_PELIGROSOS = [
   // Path traversal
   '../', '..\\', '/etc/', 'c:\\', 'c:/',
   'system.ini', 'win.ini', 'web-inf',
-  // Slash sola (path traversal relativo)
-  // Se evalúa aparte: valor exacto '/' o que empiece por '/'
+
   // XSS / HTML injection
   '<script', '<img', '<svg', '<iframe', '<object', '<embed',
   'onerror', 'onload', 'onclick', 'onmouseover', 'onfocus',
   'javascript:', 'vbscript:', 'data:text', 'data:image/svg',
+
+  // XML / XPath injection
+  '<!--',       // cubre tanto <!--# (SSI) como <!-- (XML)
+  ']]>',        // cierre de sección CDATA — XPath/XML injection
+  '<!entity',
+  '<!doctype',
+
   // Template injection
   '{{', '}}', '${', '#{', '<%', '%>',
+  '{#',         // FreeMarker #{...}
+  '{@',         // Velocity/Spring @math, @twig
+
+  // SSTI numérico — patrón zj+N*N+zj y zj{N*N}zj
+  // Se detecta por la presencia del marcador 'zj' con operaciones aritméticas
+  // Manejado aparte en la función esValorPeligroso()
+
   // SSI injection
-  '<!--#', '#exec', '#include',
-  // SQL injection
-  ' union ', ' or 1', ' and 1', "'--", ';--', '" or "', "' or '",
+  '#exec', '#include',
+
+  // SQL injection — palabras clave y operadores
+  ' union ', ' or 1', ' and 1',
+  "'--", ';--', '" or "', "' or '",
   'drop table', 'insert into', 'select *',
-  // Open redirect / SSRF — con protocolo
+  // SQL blind sin comilla previa
+  ' and 1=', ' or 1=',
+
+  // Open redirect / SSRF con protocolo
   'http://', 'https://', 'ftp://', '://',
-  // www. sin protocolo (open redirect probe)
+  // Open redirect sin protocolo
   'www.',
+
   // Null bytes
   '%00', '\x00',
-  // Otros
+
+  // Misc
   'alert(', 'prompt(', 'confirm(', 'eval(',
+
+  // Command injection probes comunes de ZAP/Burp
+  'get-help',
+  ';get-help',
+  '|get-help',
+  '`get-help',
+  '$(get-help)',
 ]
 
-// Dominios de callback SSRF (owasp, burp, interactsh, etc.)
+// Caracteres individuales que son suficientes para bloquear en query params
+// (no en el body del formulario, solo como query params en GET)
+const CHARS_PELIGROSOS = [
+  "'",    // comilla simple — SQL injection
+  '"',    // comilla doble — SQL / XSS
+  ';',    // punto y coma — SQL / command injection
+  '`',    // backtick — command injection
+]
+
+// Dominios de callback SSRF
 const DOMINIOS_SSRF = [
   '.owasp.org',
   '.burpcollaborator.net',
@@ -42,8 +78,8 @@ const DOMINIOS_SSRF = [
   '.ngrok.io',
   '.ngrok-free.app',
   'localtest.me',
-  '169.254.',   // AWS metadata IP
-  '127.',        // localhost
+  '169.254.',
+  '127.',
   '0.0.0.0',
   '::1',
 ]
@@ -72,17 +108,36 @@ function decodeSafe(valor: string): string {
   try { return decodeURIComponent(valor) } catch { return valor }
 }
 
+function esSSTI(decoded: string): boolean {
+  // Patrón SSTI: marcador zj con aritmética — zj+N*N+zj, zj{N*N}zj
+  // También cubre: zj{#N*N}zj (FreeMarker), zj{@N*N}zj (Velocity/Twig)
+  // y {@math key="N" method="multiply" operand="N"/} (Velocity)
+  if (/zj[\s+{][\d#@]/.test(decoded)) return true
+  if (/zj\s*\*\s*\d/.test(decoded)) return true
+  if (/\{@math\s+key=/i.test(decoded)) return true
+  return false
+}
+
 function esValorPeligroso(valor: string): boolean {
-  const decoded = decodeSafe(valor).toLowerCase().trim()
+  const decoded = decodeSafe(valor).trim()
+  const decodedLower = decoded.toLowerCase()
 
   // Valor exactamente '/' o que empiece con '/' (path traversal relativo)
   if (decoded === '/' || decoded.startsWith('/')) return true
 
-  // Patrones textuales
-  if (PATRONES_PELIGROSOS.some(p => decoded.includes(p.toLowerCase()))) return true
+  // Caracteres peligrosos solos o en combinación simple
+  for (const ch of CHARS_PELIGROSOS) {
+    if (decoded.includes(ch)) return true
+  }
+
+  // SSTI — detección por patrón de marcador aritmético
+  if (esSSTI(decoded)) return true
+
+  // Patrones textuales de la lista
+  if (PATRONES_PELIGROSOS.some(p => decodedLower.includes(p.toLowerCase()))) return true
 
   // Dominios de callback SSRF
-  if (DOMINIOS_SSRF.some(d => decoded.includes(d.toLowerCase()))) return true
+  if (DOMINIOS_SSRF.some(d => decodedLower.includes(d.toLowerCase()))) return true
 
   return false
 }
@@ -90,7 +145,6 @@ function esValorPeligroso(valor: string): boolean {
 function urlTienePeligro(request: NextRequest): boolean {
   const params = request.nextUrl.searchParams
 
-  // Revisar parámetros sensibles conocidos
   for (const param of PARAMETROS_VIGILADOS) {
     const valor = params.get(param)
     if (valor && esValorPeligroso(valor)) return true
@@ -191,10 +245,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Aplica a todas las rutas excepto assets estáticos de Next.js.
-     * Cubre /favicon.ico y cualquier otra ruta usada como vector de ataque.
-     */
     '/((?!_next/static|_next/image).*)',
   ],
 }
