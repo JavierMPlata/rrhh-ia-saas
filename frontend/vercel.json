@@ -40,6 +40,36 @@
   ],
   "redirects": [
     {
+      "source": "/",
+      "has": [{ "type": "query", "key": "ciudad" }],
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [{ "type": "query", "key": "email" }],
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [{ "type": "query", "key": "nombre_completo" }],
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [{ "type": "query", "key": "telefono" }],
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [{ "type": "query", "key": "vacante_id" }],
+      "destination": "/",
+      "permanent": false
+    },
+    {
       "source": "/:path*",
       "has": [
         {
@@ -81,7 +111,7 @@
         {
           "type": "query",
           "key": "email",
-          "value": "(?i).*(\\.\\.[\\/\\\\]|\\.\\.|c:\\\\|c:\\/|\\/etc\\/|web-inf|system\\.ini|win\\.ini|<|\\{\\{|\\$\\{|#\\{|script|onerror|exec|cmd=|union|select|alert|prompt|confirm).*"
+          "value": "(?i).*(\\.\\.[\\/\\\\]|\\.\\.|c:\\\\|c:\\/|\\/etc\\/|web-inf|system\\.ini|win\\.ini|<|\\{\\{|\\$\\{|script|onerror|exec|cmd=|union|select|alert|prompt|confirm).*"
         }
       ],
       "destination": "/",

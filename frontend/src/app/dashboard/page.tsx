@@ -1,930 +1,359 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
-import type { Candidato, Evaluacion, Vacante } from '@/lib/supabase'
-import Estadisticas from '@/components/Estadisticas'
-import ExportarCandidatos from '@/components/ExportarCandidatos'
-import { registrarAuditoria } from '@/lib/auditoria'
+import type { Vacante } from '@/lib/supabase'
 
-type CandidatoConEvaluacion = Candidato & {
-  evaluaciones?: Evaluacion[]
-  vacantes?: { titulo: string; departamento: string }
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const TELEFONO_REGEX = /^[0-9+\-\s]{7,15}$/
+
+const PATRONES_PELIGROSOS = [
+  '../', '..\\', '/etc/', 'c:\\', 'c:/', 'system.ini', 'win.ini',
+  'web-inf', '<', '{%', '{{', '${', '#{',
+  'script', 'onerror', 'onload', 'onclick', 'alert(', 'prompt(', 'confirm(',
+  'javascript:', 'vbscript:', 'data:text/html',
+  '<!--#', '#exec', '#include',
+  'union ', ' or ', ' and ', '--', ';--', "'; ", '"; ',
+  'http://', 'https://', 'www.',
+  '\x00', '%00',
+]
+
+function esPeligroso(valor: string): boolean {
+  const lower = valor.toLowerCase()
+  return PATRONES_PELIGROSOS.some(p => lower.includes(p.toLowerCase()))
 }
 
-const ESTADOS_COLOR: Record<string, string> = {
-  recibido: 'bg-gray-100 text-gray-600',
-  en_proceso: 'bg-blue-100 text-blue-700',
-  analizado: 'bg-purple-100 text-purple-700',
-  preseleccionado: 'bg-green-100 text-green-700',
-  descartado: 'bg-red-100 text-red-700',
-  banco_talentos: 'bg-amber-100 text-amber-700',
+// Limpia TODOS los query params al montar — el formulario es SPA y no los necesita
+function limpiarURLSospechosa() {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+
+  // Si hay CUALQUIER query param, los eliminamos todos.
+  // El formulario público no consume parámetros de URL, así que cualquier
+  // query param es bien innecesario o es un intento de reflected parameter injection.
+  if (url.searchParams.toString().length > 0) {
+    url.search = ''
+    window.history.replaceState({}, '', url.toString())
+  }
 }
 
-const ESTADOS_ETIQUETA: Record<string, string> = {
-  recibido: 'Recibido',
-  en_proceso: 'En proceso',
-  analizado: 'Analizado',
-  preseleccionado: 'Preseleccionado',
-  descartado: 'Descartado',
-  banco_talentos: 'Banco de talentos',
-}
-
-export default function DashboardPage() {
-  const router = useRouter()
+export default function FormularioPublico() {
   const supabase = createClient()
-
-  const [pestana, setPestana] = useState<'candidatos' | 'vacantes' | 'estadisticas'>('candidatos')
-  const [candidatos, setCandidatos] = useState<CandidatoConEvaluacion[]>([])
   const [vacantes, setVacantes] = useState<Vacante[]>([])
-  const [loading, setLoading] = useState(true)
-  const [filtroEstado, setFiltroEstado] = useState('todos')
-  const [filtroVacante, setFiltroVacante] = useState('todas')
-  const [filtroRecomendacion, setFiltroRecomendacion] = useState('todas')
-  const [busqueda, setBusqueda] = useState('')
-  const [ordenarPor, setOrdenarPor] = useState<'fecha' | 'score'>('score')
-  const [mostrarFiltrosAvanzados, setMostrarFiltrosAvanzados] = useState(false)
-  const [candidatoSeleccionado, setCandidatoSeleccionado] = useState<CandidatoConEvaluacion | null>(null)
-  const [userEmail, setUserEmail] = useState('')
-  const [modalVacante, setModalVacante] = useState(false)
-  const [vacanteEditar, setVacanteEditar] = useState<Vacante | null>(null)
-
-  const cargarCandidatos = useCallback(async () => {
-    setLoading(true)
-    const { data } = await supabase
-      .from('candidatos')
-      .select('*, evaluaciones(*), vacantes(titulo, departamento)')
-      .order('created_at', { ascending: false })
-    if (data) setCandidatos(data as CandidatoConEvaluacion[])
-    setLoading(false)
-  }, [])
-
-  const cargarVacantes = useCallback(async () => {
-    const { data } = await supabase
-      .from('vacantes')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (data) setVacantes(data as Vacante[])
-  }, [])
+  const [loading, setLoading] = useState(false)
+  const [enviado, setEnviado] = useState(false)
+  const [error, setError] = useState('')
+  const [archivo, setArchivo] = useState<File | null>(null)
+  const [aceptaTerminos, setAceptaTerminos] = useState(false)
+  const [aceptaTratamiento, setAceptaTratamiento] = useState(false)
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) {
-        router.push('/login')
-      } else {
-        setUserEmail(user.email || '')
-        cargarCandidatos()
-        cargarVacantes()
-        registrarAuditoria('acceso_dashboard')
-      }
-    })
+    // Eliminar TODOS los query params de la URL al cargar
+    limpiarURLSospechosa()
+
+    supabase.from('vacantes')
+      .select('id, titulo, departamento, modalidad')
+      .eq('estado', 'activa')
+      .then(({ data }) => {
+        if (data) setVacantes(data as Vacante[])
+      })
   }, [])
 
-  const handleLogout = async () => {
-    await registrarAuditoria('cierre_sesion')
-    await supabase.auth.signOut()
-    router.push('/login')
-  }
-
-  const cambiarEstadoVacante = async (id: string, nuevoEstado: string) => {
-    await supabase.from('vacantes').update({ estado: nuevoEstado }).eq('id', id)
-    await registrarAuditoria(
-      'cambio_estado_vacante',
-      'vacantes',
-      id,
-      { estado_nuevo: nuevoEstado }
-    )
-    cargarVacantes()
-  }
-
-  const candidatosFiltrados = candidatos
-    .filter(c => {
-      const matchEstado = filtroEstado === 'todos' || c.estado === filtroEstado
-      const matchVacante = filtroVacante === 'todas' || c.vacante_id === filtroVacante
-      const matchRecomendacion = filtroRecomendacion === 'todas' ||
-        c.evaluaciones?.[0]?.recomendacion === filtroRecomendacion
-      const matchBusqueda = !busqueda ||
-        c.nombre_completo.toLowerCase().includes(busqueda.toLowerCase()) ||
-        c.email.toLowerCase().includes(busqueda.toLowerCase()) ||
-        c.ciudad?.toLowerCase().includes(busqueda.toLowerCase()) ||
-        c.evaluaciones?.[0]?.habilidades_detectadas?.some(h =>
-          h.toLowerCase().includes(busqueda.toLowerCase())
-        ) ||
-        c.evaluaciones?.[0]?.ultimo_cargo?.toLowerCase().includes(busqueda.toLowerCase())
-      return matchEstado && matchVacante && matchRecomendacion && matchBusqueda
-    })
-    .sort((a, b) => {
-      if (ordenarPor === 'score') {
-        const scoreA = a.evaluaciones?.[0]?.score_total ?? -1
-        const scoreB = b.evaluaciones?.[0]?.score_total ?? -1
-        return scoreB - scoreA
-      }
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    })
-
-  const stats = {
-    total: candidatos.length,
-    preseleccionados: candidatos.filter(c => c.estado === 'preseleccionado').length,
-    analizados: candidatos.filter(c => c.estado === 'analizado').length,
-    descartados: candidatos.filter(c => c.estado === 'descartado').length,
-  }
-
-  const hayFiltrosActivos = filtroEstado !== 'todos' ||
-    filtroVacante !== 'todas' ||
-    filtroRecomendacion !== 'todas' ||
-    busqueda !== ''
-
-  const limpiarFiltros = () => {
-    setFiltroEstado('todos')
-    setFiltroVacante('todas')
-    setFiltroRecomendacion('todas')
-    setBusqueda('')
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-xs font-bold">
-            RH
-          </div>
-          <span className="font-semibold text-gray-900">Panel RRHH</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-gray-500 hidden sm:block">{userEmail}</span>
-          <button
-            onClick={() => { setVacanteEditar(null); setModalVacante(true) }}
-            className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
-          >
-            + Nueva vacante
-          </button>
-          <button
-            onClick={() => router.push('/dashboard/admin')}
-            className="text-sm text-purple-600 hover:text-purple-800 font-medium"
-          >
-            ⚙️ Admin
-          </button>
-          <button
-            onClick={() => { cargarCandidatos(); cargarVacantes() }}
-            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-          >
-            Actualizar
-          </button>
-          <button
-            onClick={handleLogout}
-            className="text-sm text-gray-500 hover:text-gray-900"
-          >
-            Cerrar sesión
-          </button>
-        </div>
-      </nav>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-          {[
-            { label: 'Total candidatos', value: stats.total, color: 'text-gray-900' },
-            { label: 'Preseleccionados', value: stats.preseleccionados, color: 'text-green-600' },
-            { label: 'Por revisar', value: stats.analizados, color: 'text-purple-600' },
-            { label: 'Descartados', value: stats.descartados, color: 'text-red-500' },
-          ].map(stat => (
-            <div key={stat.label} className="bg-white rounded-xl border border-gray-100 p-5">
-              <p className="text-sm text-gray-500">{stat.label}</p>
-              <p className={`text-2xl font-bold mt-1 ${stat.color}`}>{stat.value}</p>
-            </div>
-          ))}
-        </div>
-
-        <div className="flex gap-1 mb-4 bg-gray-100 p-1 rounded-xl w-fit">
-          {[
-            { id: 'candidatos', label: `Candidatos (${candidatos.length})` },
-            { id: 'vacantes', label: `Vacantes (${vacantes.length})` },
-            { id: 'estadisticas', label: 'Estadísticas' },
-          ].map(p => (
-            <button
-              key={p.id}
-              onClick={() => setPestana(p.id as any)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors
-                ${pestana === p.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-
-        {pestana === 'candidatos' && (
-          <>
-            <div className="bg-white rounded-xl border border-gray-100 p-4 mb-3 space-y-3">
-              <div className="flex flex-wrap gap-3">
-                <input
-                  type="text"
-                  placeholder="Buscar por nombre, email, ciudad, cargo o habilidad..."
-                  value={busqueda}
-                  onChange={e => setBusqueda(e.target.value)}
-                  className="flex-1 min-w-48 px-4 py-2 border border-gray-200 rounded-lg text-sm
-                             text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <button
-                  onClick={() => setMostrarFiltrosAvanzados(!mostrarFiltrosAvanzados)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2
-                    ${mostrarFiltrosAvanzados || hayFiltrosActivos
-                      ? 'bg-indigo-100 text-indigo-700'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                >
-                  Filtros
-                  {hayFiltrosActivos && (
-                    <span className="w-2 h-2 rounded-full bg-indigo-600 inline-block" />
-                  )}
-                </button>
-                {hayFiltrosActivos && (
-                  <button
-                    onClick={limpiarFiltros}
-                    className="px-4 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 transition-colors"
-                  >
-                    Limpiar filtros
-                  </button>
-                )}
-                <ExportarCandidatos candidatos={candidatosFiltrados} />
-              </div>
-
-              {mostrarFiltrosAvanzados && (
-                <div className="flex flex-wrap gap-3 pt-3 border-t border-gray-100">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-500 font-medium">Estado</label>
-                    <select
-                      value={filtroEstado}
-                      onChange={e => setFiltroEstado(e.target.value)}
-                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900
-                                 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="todos">Todos los estados</option>
-                      {Object.entries(ESTADOS_ETIQUETA).map(([val, label]) => (
-                        <option key={val} value={val}>{label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-500 font-medium">Vacante</label>
-                    <select
-                      value={filtroVacante}
-                      onChange={e => setFiltroVacante(e.target.value)}
-                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900
-                                 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="todas">Todas las vacantes</option>
-                      {vacantes.map(v => (
-                        <option key={v.id} value={v.id}>{v.titulo}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-500 font-medium">Recomendación IA</label>
-                    <select
-                      value={filtroRecomendacion}
-                      onChange={e => setFiltroRecomendacion(e.target.value)}
-                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900
-                                 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="todas">Todas</option>
-                      <option value="contratar">Contratar</option>
-                      <option value="entrevistar">Entrevistar</option>
-                      <option value="descartar">Descartar</option>
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-gray-500 font-medium">Ordenar por</label>
-                    <select
-                      value={ordenarPor}
-                      onChange={e => setOrdenarPor(e.target.value as 'fecha' | 'score')}
-                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900
-                                 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="score">Mayor score</option>
-                      <option value="fecha">Más reciente</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {hayFiltrosActivos && (
-                <div className="text-xs text-gray-500 pt-1">
-                  Mostrando <span className="font-semibold text-indigo-600">{candidatosFiltrados.length}</span> de {candidatos.length} candidatos
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              {loading ? (
-                <div className="p-12 text-center text-gray-400">
-                  <div className="animate-spin w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto mb-3" />
-                  Cargando candidatos...
-                </div>
-              ) : candidatosFiltrados.length === 0 ? (
-                <div className="p-12 text-center text-gray-400">
-                  <p className="mb-2">No hay candidatos con los filtros aplicados.</p>
-                  {hayFiltrosActivos && (
-                    <button onClick={limpiarFiltros} className="text-indigo-600 text-sm hover:underline">
-                      Limpiar filtros
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b border-gray-100">
-                      <tr>
-                        <th className="text-left px-4 py-3 font-medium text-gray-600">Candidato</th>
-                        <th className="text-left px-4 py-3 font-medium text-gray-600">Vacante</th>
-                        <th className="text-left px-4 py-3 font-medium text-gray-600">Estado</th>
-                        <th className="text-center px-4 py-3 font-medium text-gray-600">Score</th>
-                        <th className="text-center px-4 py-3 font-medium text-gray-600">IA dice</th>
-                        <th className="text-left px-4 py-3 font-medium text-gray-600">Fecha</th>
-                        <th className="text-center px-4 py-3 font-medium text-gray-600">Acción</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {candidatosFiltrados.map(c => {
-                        const ev = c.evaluaciones?.[0]
-                        const score = ev?.score_total ?? null
-                        const scoreColor = score === null ? 'text-gray-400'
-                          : score >= 80 ? 'text-green-600'
-                            : score >= 60 ? 'text-amber-500'
-                              : 'text-red-500'
-                        const recomColor = ev?.recomendacion === 'contratar' ? 'bg-green-100 text-green-700'
-                          : ev?.recomendacion === 'entrevistar' ? 'bg-blue-100 text-blue-700'
-                            : ev?.recomendacion === 'descartar' ? 'bg-red-100 text-red-700'
-                              : 'bg-gray-100 text-gray-500'
-                        return (
-                          <tr key={c.id} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-4 py-3">
-                              <div className="font-medium text-gray-900">{c.nombre_completo}</div>
-                              <div className="text-gray-400 text-xs">{c.email}</div>
-                              {c.ciudad && <div className="text-gray-400 text-xs">{c.ciudad}</div>}
-                              {c.notas && (
-                                <div className="text-amber-600 text-xs mt-0.5">📝 Tiene notas</div>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-gray-600 text-xs">
-                              {(c.vacantes as any)?.titulo || '—'}
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium
-                                               ${ESTADOS_COLOR[c.estado] || 'bg-gray-100 text-gray-600'}`}>
-                                {ESTADOS_ETIQUETA[c.estado] || c.estado}
-                              </span>
-                            </td>
-                            <td className={`px-4 py-3 text-center font-bold text-lg ${scoreColor}`}>
-                              {score !== null ? score.toFixed(1) : '—'}
-                              {ev?.alerta_sesgo && (
-                                <span title="Alerta de sesgo" className="ml-1 text-amber-500 text-sm">⚠️</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              {ev?.recomendacion ? (
-                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize ${recomColor}`}>
-                                  {ev.recomendacion}
-                                </span>
-                              ) : '—'}
-                            </td>
-                            <td className="px-4 py-3 text-gray-400 text-xs">
-                              {new Date(c.created_at).toLocaleDateString('es-CO', {
-                                day: '2-digit', month: 'short', year: 'numeric'
-                              })}
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <button
-                                onClick={() => setCandidatoSeleccionado(c)}
-                                className="text-indigo-600 hover:text-indigo-800 text-xs font-medium
-                                           bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
-                              >
-                                Ver perfil
-                              </button>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {pestana === 'vacantes' && (
-          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            {vacantes.length === 0 ? (
-              <div className="p-12 text-center text-gray-400">No hay vacantes creadas aún.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-100">
-                    <tr>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Vacante</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Departamento</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Modalidad</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Estado</th>
-                      <th className="text-center px-4 py-3 font-medium text-gray-600">Candidatos</th>
-                      <th className="text-center px-4 py-3 font-medium text-gray-600">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {vacantes.map(v => {
-                      const totalCandidatos = candidatos.filter(c => c.vacante_id === v.id).length
-                      const estadoColor = v.estado === 'activa' ? 'bg-green-100 text-green-700'
-                        : v.estado === 'pausada' ? 'bg-amber-100 text-amber-700'
-                          : 'bg-red-100 text-red-700'
-                      return (
-                        <tr key={v.id} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-4 py-3">
-                            <div className="font-medium text-gray-900">{v.titulo}</div>
-                            <div className="text-gray-400 text-xs mt-0.5">
-                              Exp. mín: {v.experiencia_minima} años · {v.educacion_requerida}
-                            </div>
-                            {v.salario_min && v.salario_max && (
-                              <div className="text-gray-400 text-xs">
-                                ${v.salario_min?.toLocaleString()} - ${v.salario_max?.toLocaleString()} COP
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 text-xs">{v.departamento || '—'}</td>
-                          <td className="px-4 py-3 text-gray-600 text-xs capitalize">{v.modalidad}</td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${estadoColor}`}>
-                              {v.estado}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-center text-gray-700 font-medium">{totalCandidatos}</td>
-                          <td className="px-4 py-3 text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              <button
-                                onClick={() => router.push(`/dashboard/vacante/${v.id}`)}
-                                className="text-purple-600 hover:text-purple-800 text-xs font-medium
-                                           bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors"
-                              >
-                                Ver detalle
-                              </button>
-                              <button
-                                onClick={() => { setVacanteEditar(v); setModalVacante(true) }}
-                                className="text-indigo-600 hover:text-indigo-800 text-xs font-medium
-                                           bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
-                              >
-                                Editar
-                              </button>
-                              {v.estado === 'activa' ? (
-                                <button
-                                  onClick={() => cambiarEstadoVacante(v.id, 'cerrada')}
-                                  className="text-red-600 hover:text-red-800 text-xs font-medium
-                                             bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors"
-                                >
-                                  Cerrar
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => cambiarEstadoVacante(v.id, 'activa')}
-                                  className="text-green-600 hover:text-green-800 text-xs font-medium
-                                             bg-green-50 hover:bg-green-100 px-3 py-1.5 rounded-lg transition-colors"
-                                >
-                                  Activar
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {pestana === 'estadisticas' && (
-          <Estadisticas candidatos={candidatos} />
-        )}
-      </div>
-
-      {modalVacante && (
-        <ModalVacante
-          vacante={vacanteEditar}
-          onClose={() => { setModalVacante(false); setVacanteEditar(null) }}
-          onGuardada={() => { setModalVacante(false); setVacanteEditar(null); cargarVacantes() }}
-        />
-      )}
-
-      {candidatoSeleccionado && (
-        <ModalCandidato
-          candidato={candidatoSeleccionado}
-          onClose={() => setCandidatoSeleccionado(null)}
-          onActualizado={cargarCandidatos}
-        />
-      )}
-    </div>
-  )
-}
-
-function ModalVacante({
-  vacante,
-  onClose,
-  onGuardada
-}: {
-  vacante: Vacante | null
-  onClose: () => void
-  onGuardada: () => void
-}) {
-  const supabase = createClient()
-  const [guardando, setGuardando] = useState(false)
-  const [error, setError] = useState('')
-  const [form, setForm] = useState({
-    titulo: vacante?.titulo || '',
-    descripcion: vacante?.descripcion || '',
-    departamento: vacante?.departamento || '',
-    salario_min: vacante?.salario_min?.toString() || '',
-    salario_max: vacante?.salario_max?.toString() || '',
-    modalidad: vacante?.modalidad || 'hibrido',
-    experiencia_minima: vacante?.experiencia_minima?.toString() || '0',
-    educacion_requerida: vacante?.educacion_requerida || 'universitario',
-    habilidades_requeridas: vacante?.habilidades_requeridas?.join(', ') || '',
-    valores_empresa: (vacante as any)?.valores_empresa?.join(', ') || '',
-  })
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
-  }
-
-  const handleGuardar = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    setGuardando(true)
+    setLoading(true)
     setError('')
-    const habilidades = form.habilidades_requeridas.split(',').map(h => h.trim()).filter(h => h.length > 0)
-    const valores = form.valores_empresa.split(',').map((val: string) => val.trim()).filter((val: string) => val.length > 0)
-    const datos = {
-      titulo: form.titulo,
-      descripcion: form.descripcion,
-      departamento: form.departamento || null,
-      salario_min: form.salario_min ? parseFloat(form.salario_min) : null,
-      salario_max: form.salario_max ? parseFloat(form.salario_max) : null,
-      modalidad: form.modalidad,
-      experiencia_minima: parseInt(form.experiencia_minima),
-      educacion_requerida: form.educacion_requerida,
-      habilidades_requeridas: habilidades,
-      valores_empresa: valores,
+
+    const form = e.currentTarget
+    const nombreCompleto = (form.elements.namedItem('nombre_completo') as HTMLInputElement).value.trim()
+    const email = (form.elements.namedItem('email') as HTMLInputElement).value.trim()
+    const telefono = (form.elements.namedItem('telefono') as HTMLInputElement).value.trim()
+    const ciudad = (form.elements.namedItem('ciudad') as HTMLInputElement).value.trim()
+    const vacanteId = (form.elements.namedItem('vacante_id') as HTMLSelectElement).value.trim()
+
+    if (!aceptaTerminos || !aceptaTratamiento) {
+      setError('Debes aceptar los términos y el tratamiento de datos personales')
+      setLoading(false)
+      return
     }
-    if (vacante) {
-      const { error } = await supabase.from('vacantes').update(datos).eq('id', vacante.id)
-      if (error) { setError('Error al actualizar: ' + error.message); setGuardando(false); return }
-      await registrarAuditoria('editar_vacante', 'vacantes', vacante.id, { titulo: datos.titulo })
-    } else {
-      const { data, error } = await supabase.from('vacantes').insert({ ...datos, estado: 'activa' }).select().single()
-      if (error) { setError('Error al crear: ' + error.message); setGuardando(false); return }
-      await registrarAuditoria('crear_vacante', 'vacantes', data?.id, { titulo: datos.titulo })
+
+    if (!archivo) {
+      setError('Por favor adjunta tu hoja de vida (PDF o Word)')
+      setLoading(false)
+      return
     }
-    onGuardada()
-  }
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white rounded-t-2xl">
-          <h2 className="text-lg font-semibold text-gray-900">
-            {vacante ? 'Editar vacante' : 'Nueva vacante'}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
-        </div>
-        <form onSubmit={handleGuardar} className="p-6 space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Título del cargo *</label>
-            <input name="titulo" required value={form.titulo} onChange={handleChange}
-              placeholder="Ej: Desarrollador Full Stack"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Descripción *</label>
-            <textarea name="descripcion" required value={form.descripcion} onChange={handleChange} rows={3}
-              placeholder="Describe el cargo..."
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Departamento</label>
-              <input name="departamento" value={form.departamento} onChange={handleChange}
-                placeholder="Ej: Tecnología"
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Modalidad</label>
-              <select name="modalidad" value={form.modalidad} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <option value="presencial">Presencial</option>
-                <option value="remoto">Remoto</option>
-                <option value="hibrido">Híbrido</option>
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Salario mínimo (COP)</label>
-              <input name="salario_min" type="number" value={form.salario_min} onChange={handleChange}
-                placeholder="Ej: 3500000"
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Salario máximo (COP)</label>
-              <input name="salario_max" type="number" value={form.salario_max} onChange={handleChange}
-                placeholder="Ej: 6000000"
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Experiencia mínima (años)</label>
-              <input name="experiencia_minima" type="number" min="0" value={form.experiencia_minima} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Educación requerida</label>
-              <select name="educacion_requerida" value={form.educacion_requerida} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <option value="bachillerato">Bachillerato</option>
-                <option value="tecnico">Técnico</option>
-                <option value="tecnologo">Tecnólogo</option>
-                <option value="universitario">Universitario</option>
-                <option value="posgrado">Posgrado</option>
-                <option value="maestria">Maestría</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Habilidades requeridas <span className="text-gray-400 font-normal">(separadas por coma)</span>
-            </label>
-            <input name="habilidades_requeridas" value={form.habilidades_requeridas} onChange={handleChange}
-              placeholder="Ej: Python, React, SQL, Git"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Valores de la empresa <span className="text-gray-400 font-normal">(separados por coma)</span>
-            </label>
-            <input name="valores_empresa" value={form.valores_empresa} onChange={handleChange}
-              placeholder="Ej: innovacion, trabajo_en_equipo"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-          </div>
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
-          )}
-          <div className="flex gap-3 pt-2">
-            <button type="button" onClick={onClose}
-              className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-lg text-sm font-medium transition-colors">
-              Cancelar
-            </button>
-            <button type="submit" disabled={guardando}
-              className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
-              {guardando ? (
-                <>
-                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Guardando...
-                </>
-              ) : vacante ? 'Guardar cambios' : 'Crear vacante'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-function ModalCandidato({
-  candidato,
-  onClose,
-  onActualizado
-}: {
-  candidato: CandidatoConEvaluacion
-  onClose: () => void
-  onActualizado: () => void
-}) {
-  const ev = candidato.evaluaciones?.[0]
-  const supabase = createClient()
-  const [actualizando, setActualizando] = useState(false)
-  const [notas, setNotas] = useState(candidato.notas || '')
-  const [guardandoNota, setGuardandoNota] = useState(false)
-  const [notaGuardada, setNotaGuardada] = useState(false)
-
-  const verCV = async () => {
-    if (!candidato.cv_nombre_archivo) return
-    const { data, error } = await supabase.storage
-      .from('cvs')
-      .createSignedUrl(candidato.cv_nombre_archivo, 120)
-    if (error) { alert('No se pudo acceder al CV: ' + error.message); return }
-    await registrarAuditoria('ver_cv', 'candidatos', candidato.id, { candidato: candidato.nombre_completo })
-    window.open(data.signedUrl, '_blank')
-  }
-
-  const actualizarEstado = async (nuevoEstado: string) => {
-    setActualizando(true)
-    await supabase.from('candidatos').update({ estado: nuevoEstado }).eq('id', candidato.id)
-    await registrarAuditoria(
-      'cambio_estado_candidato',
-      'candidatos',
-      candidato.id,
-      {
-        estado_anterior: candidato.estado,
-        estado_nuevo: nuevoEstado,
-        candidato: candidato.nombre_completo
+    for (const [campo, valor] of [
+      ['Nombre', nombreCompleto],
+      ['Ciudad', ciudad],
+    ]) {
+      if (esPeligroso(valor)) {
+        setError(`El campo ${campo} contiene caracteres no permitidos`)
+        setLoading(false)
+        return
       }
-    )
-    onActualizado()
-    onClose()
-    setActualizando(false)
+    }
+
+    if (esPeligroso(email.replace('@', '').replace('.', ''))) {
+      setError('El correo electrónico contiene caracteres no permitidos')
+      setLoading(false)
+      return
+    }
+
+    if (telefono && !TELEFONO_REGEX.test(telefono)) {
+      setError('El teléfono solo puede contener números, espacios, + y -')
+      setLoading(false)
+      return
+    }
+
+    if (vacanteId && !UUID_REGEX.test(vacanteId)) {
+      setError('La vacante seleccionada no es válida')
+      setLoading(false)
+      return
+    }
+
+    const formData = new FormData()
+    formData.append('nombre_completo', nombreCompleto)
+    formData.append('email', email)
+    formData.append('telefono', telefono)
+    formData.append('ciudad', ciudad)
+    formData.append('vacante_id', vacanteId)
+    formData.append('acepta_terminos', 'true')
+    formData.append('acepta_tratamiento_datos', 'true')
+    formData.append('cv', archivo)
+
+    try {
+      const res = await fetch(`${API_URL}/api/candidatos/aplicar`, {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Error al enviar tu aplicación')
+      setEnviado(true)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Ocurrió un error. Por favor intenta de nuevo.'
+      setError(message)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const guardarNota = async () => {
-    setGuardandoNota(true)
-    await supabase.from('candidatos').update({ notas }).eq('id', candidato.id)
-    await registrarAuditoria(
-      'agregar_nota_candidato',
-      'candidatos',
-      candidato.id,
-      { candidato: candidato.nombre_completo }
+  if (enviado) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-white flex items-center justify-center p-4">
+        <div className="max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">¡Aplicación recibida!</h2>
+          <p className="text-gray-600 mb-6">
+            Gracias por tu interés. Nuestro equipo revisará tu perfil y te contactaremos pronto.
+          </p>
+          <button
+            onClick={() => setEnviado(false)}
+            className="text-indigo-600 hover:underline text-sm"
+          >
+            Aplicar a otra vacante
+          </button>
+        </div>
+      </div>
     )
-    setGuardandoNota(false)
-    setNotaGuardada(true)
-    setTimeout(() => setNotaGuardada(false), 2000)
-    onActualizado()
   }
-
-  const ScoreBar = ({ label, value, color }: { label: string; value: number; color: string }) => (
-    <div className="mb-3">
-      <div className="flex justify-between text-xs mb-1">
-        <span className="text-gray-500">{label}</span>
-        <span className="font-medium text-gray-700">{Number(value).toFixed(1)}/100</span>
-      </div>
-      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${color} transition-all duration-700`}
-          style={{ width: `${Math.min(100, Number(value))}%` }} />
-      </div>
-    </div>
-  )
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-100 flex items-start justify-between sticky top-0 bg-white rounded-t-2xl">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-white py-12 px-4">
+      <div className="max-w-2xl mx-auto">
+        <div className="text-center mb-10">
+          <div className="inline-flex items-center gap-2 bg-indigo-100 text-indigo-700 text-sm px-3 py-1 rounded-full mb-4">
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse inline-block"/>
+            Convocatoria abierta
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900">Aplica a nuestra startup</h1>
+          <p className="text-gray-500 mt-2">
+            Completa el formulario y adjunta tu CV. Nuestro sistema con IA analizará tu perfil.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6">
+
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">{candidato.nombre_completo}</h2>
-            <p className="text-sm text-gray-500 mt-0.5">
-              {candidato.email}{candidato.ciudad && ` · ${candidato.ciudad}`}
+            <h2 className="text-base font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-100">
+              Datos personales
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Nombre completo *
+                </label>
+                <input
+                  name="nombre_completo"
+                  type="text"
+                  required
+                  maxLength={100}
+                  placeholder="Ej: María García López"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Correo electrónico *
+                </label>
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  maxLength={100}
+                  placeholder="tu@email.com"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Teléfono
+                </label>
+                <input
+                  name="telefono"
+                  type="tel"
+                  maxLength={15}
+                  placeholder="+57 300 123 4567"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Ciudad de residencia
+                </label>
+                <input
+                  name="ciudad"
+                  type="text"
+                  maxLength={60}
+                  placeholder="Bogotá"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Vacante de interés
+                </label>
+                <select
+                  name="vacante_id"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                >
+                  <option value="">Selecciona una vacante</option>
+                  {vacantes.map(v => (
+                    <option key={v.id} value={v.id}>
+                      {v.titulo} — {v.modalidad}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h2 className="text-base font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-100">
+              Hoja de vida
+            </h2>
+            <div
+              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors
+                ${archivo ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 hover:border-indigo-300'}`}
+              onClick={() => document.getElementById('cv-input')?.click()}
+            >
+              <input
+                id="cv-input"
+                type="file"
+                accept=".pdf,.doc,.docx"
+                className="hidden"
+                onChange={(e) => setArchivo(e.target.files?.[0] || null)}
+              />
+              {archivo ? (
+                <>
+                  <div className="text-3xl mb-2">📄</div>
+                  <p className="text-sm font-medium text-indigo-700">{archivo.name}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {(archivo.size / 1024 / 1024).toFixed(2)} MB — Clic para cambiar
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="text-3xl mb-2">📎</div>
+                  <p className="text-sm font-medium text-gray-700">Haz clic para subir tu CV</p>
+                  <p className="text-xs text-gray-400 mt-1">PDF o Word · Máximo 10 MB</p>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-blue-50 rounded-xl p-5 space-y-3">
+            <h3 className="text-sm font-semibold text-blue-900">
+              Tratamiento de datos personales — Ley 1581 de 2012
+            </h3>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={aceptaTerminos}
+                onChange={(e) => setAceptaTerminos(e.target.checked)}
+                required
+                className="mt-0.5 h-4 w-4 text-indigo-600 border-gray-300 rounded"
+              />
+              <span className="text-xs text-blue-800">
+                Acepto los términos y condiciones del proceso de selección y declaro que
+                la información suministrada es veraz y comprobable. *
+              </span>
+            </label>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={aceptaTratamiento}
+                onChange={(e) => setAceptaTratamiento(e.target.checked)}
+                required
+                className="mt-0.5 h-4 w-4 text-indigo-600 border-gray-300 rounded"
+              />
+              <span className="text-xs text-blue-800">
+                Autorizo el tratamiento de mis datos personales con fines de selección de personal,
+                de acuerdo con la{' '}
+                <a href="/privacidad" target="_blank" className="underline font-medium hover:text-blue-900">
+                  Política de Privacidad
+                </a>
+                {' '}y la Ley Estatutaria 1581 de 2012. *
+              </span>
+            </label>
+            <p className="text-xs text-blue-700 pt-1 border-t border-blue-200">
+              Puedes ejercer tu derecho al olvido en cualquier momento desde{' '}
+              <a href="/eliminar-datos" target="_blank" className="underline font-medium hover:text-blue-900">
+                esta página
+              </a>.
+              Tus datos serán conservados máximo 2 años o hasta que solicites su eliminación.
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none ml-4">×</button>
-        </div>
-        <div className="p-6 space-y-6">
-          {ev ? (
-            <div className="bg-indigo-50 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-indigo-900">Score total IA</h3>
-                  <p className="text-xs text-indigo-600 mt-0.5">
-                    Recomendación:{' '}
-                    <span className={`font-semibold capitalize
-                      ${ev.recomendacion === 'contratar' ? 'text-green-600'
-                        : ev.recomendacion === 'descartar' ? 'text-red-600'
-                          : 'text-blue-600'}`}>
-                      {ev.recomendacion}
-                    </span>
-                  </p>
-                </div>
-                <div className={`text-4xl font-bold
-                  ${Number(ev.score_total) >= 80 ? 'text-green-600'
-                    : Number(ev.score_total) >= 60 ? 'text-amber-500'
-                      : 'text-red-500'}`}>
-                  {Number(ev.score_total).toFixed(0)}
-                  <span className="text-lg text-gray-400">/100</span>
-                </div>
-              </div>
-              <ScoreBar label="Habilidades (40%)" value={Number(ev.score_habilidades)} color="bg-blue-500" />
-              <ScoreBar label="Experiencia (30%)" value={Number(ev.score_experiencia)} color="bg-teal-500" />
-              <ScoreBar label="Educación (20%)" value={Number(ev.score_educacion)} color="bg-purple-500" />
-              <ScoreBar label="Fit cultural (10%)" value={Number(ev.score_fit_cultural)} color="bg-amber-400" />
-            </div>
-          ) : (
-            <div className="bg-gray-50 rounded-xl p-5 text-center text-gray-400 text-sm">
-              Este candidato aún no ha sido analizado por IA.
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
+              {error}
             </div>
           )}
-          {ev?.alerta_sesgo && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <p className="text-sm font-medium text-amber-800">⚠️ Alerta de posible sesgo</p>
-              <p className="text-xs text-amber-700 mt-1">Tipo detectado: {ev.tipo_sesgo_detectado}.</p>
-            </div>
-          )}
-          {ev && (
-            <>
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">Resumen del perfil</h3>
-                <p className="text-sm text-gray-600 leading-relaxed bg-gray-50 rounded-lg p-3">{ev.resumen_perfil}</p>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">Justificación IA</h3>
-                <p className="text-sm text-gray-600 leading-relaxed bg-gray-50 rounded-lg p-3">{ev.justificacion_recomendacion}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Fortalezas</h3>
-                  <ul className="space-y-1.5">
-                    {ev.fortalezas?.map((f, i) => (
-                      <li key={i} className="text-xs text-gray-600 flex items-start gap-1.5">
-                        <span className="text-green-500 mt-0.5 shrink-0">✓</span> {f}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Áreas de mejora</h3>
-                  <ul className="space-y-1.5">
-                    {ev.areas_mejora?.map((a, i) => (
-                      <li key={i} className="text-xs text-gray-600 flex items-start gap-1.5">
-                        <span className="text-amber-500 mt-0.5 shrink-0">→</span> {a}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">Habilidades detectadas</h3>
-                <div className="flex flex-wrap gap-2">
-                  {ev.habilidades_detectadas?.map((h, i) => (
-                    <span key={i} className="px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs">{h}</span>
-                  ))}
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-gray-50 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-500 mb-1">Experiencia</p>
-                  <p className="text-lg font-bold text-gray-800">{ev.experiencia_anos} años</p>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-500 mb-1">Último cargo</p>
-                  <p className="text-xs font-medium text-gray-800 leading-tight">{ev.ultimo_cargo}</p>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-500 mb-1">Educación</p>
-                  <p className="text-xs font-medium text-gray-800 capitalize">{ev.nivel_educativo}</p>
-                </div>
-              </div>
-            </>
-          )}
-          <div className="border-t border-gray-100 pt-5">
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">📝 Notas del equipo RRHH</h3>
-            <textarea
-              value={notas}
-              onChange={e => setNotas(e.target.value)}
-              rows={3}
-              placeholder="Agrega notas internas sobre este candidato..."
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900
-                         bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-            />
-            <div className="flex items-center justify-between mt-2">
-              <span className="text-xs text-gray-400">Visibles solo para el equipo de RRHH</span>
-              <button
-                onClick={guardarNota}
-                disabled={guardandoNota}
-                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400
-                           text-white rounded-lg text-xs font-medium transition-colors"
-              >
-                {notaGuardada ? '✓ Guardado' : guardandoNota ? 'Guardando...' : 'Guardar nota'}
-              </button>
-            </div>
-          </div>
-          <div className="border-t border-gray-100 pt-5">
-            <h3 className="text-sm font-semibold text-gray-700 mb-3">Actualizar estado manualmente</h3>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { estado: 'preseleccionado', label: '✓ Preseleccionar', color: 'bg-green-100 text-green-700 hover:bg-green-200' },
-                { estado: 'descartado', label: '✗ Descartar', color: 'bg-red-100 text-red-700 hover:bg-red-200' },
-                { estado: 'banco_talentos', label: '★ Banco de talentos', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200' },
-              ].map(({ estado, label, color }) => (
-                <button
-                  key={estado}
-                  onClick={() => actualizarEstado(estado)}
-                  disabled={actualizando || candidato.estado === estado}
-                  className={`px-4 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 ${color}`}
-                >
-                  {label}
-                </button>
-              ))}
-              {candidato.cv_nombre_archivo && (
-                <button onClick={verCV}
-                  className="px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-xs font-medium transition-colors">
-                  📄 Ver CV
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+
+          <button
+            type="submit"
+            disabled={loading || !archivo || !aceptaTerminos || !aceptaTratamiento}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300
+                       text-white font-medium py-3 px-4 rounded-xl text-sm
+                       transition-colors flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <>
+                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                Enviando tu aplicación...
+              </>
+            ) : 'Enviar aplicación →'}
+          </button>
+        </form>
       </div>
     </div>
   )
