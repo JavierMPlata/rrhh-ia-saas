@@ -7,10 +7,45 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const TELEFONO_REGEX = /^[0-9+\-\s]{7,15}$/
-const PATRONES_PELIGROSOS = ['../', '..\\', '/etc/', 'c:\\', 'c:/', 'system.ini', 'win.ini', 'web-inf', '<', '{%', '{{', '${', '#{']
+
+// Patrones ampliados: path traversal, inyección, URLs, XSS, SQLi, SSI
+const PATRONES_PELIGROSOS = [
+  '../', '..\\', '/etc/', 'c:\\', 'c:/', 'system.ini', 'win.ini',
+  'web-inf', '<', '{%', '{{', '${', '#{',
+  // XSS / HTML injection
+  'script', 'onerror', 'onload', 'onclick', 'alert(', 'prompt(', 'confirm(',
+  'javascript:', 'vbscript:', 'data:text/html',
+  // SSI injection
+  '<!--#', '#exec', '#include',
+  // SQL injection básico
+  'union ', ' or ', ' and ', '--', ';--', "'; ", '"; ',
+  // Open redirect / SSRF
+  'http://', 'https://', 'www.',
+  // Null bytes
+  '\x00', '%00',
+]
 
 function esPeligroso(valor: string): boolean {
-  return PATRONES_PELIGROSOS.some(p => valor.toLowerCase().includes(p.toLowerCase()))
+  const lower = valor.toLowerCase()
+  return PATRONES_PELIGROSOS.some(p => lower.includes(p.toLowerCase()))
+}
+
+// Limpia query params sospechosos al montar — evita que ZAP marque 200 OK
+function limpiarURLSospechosa() {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  const camposSensibles = ['ciudad', 'email', 'nombre_completo', 'telefono', 'vacante_id']
+  let dirty = false
+  for (const campo of camposSensibles) {
+    const val = url.searchParams.get(campo)
+    if (val !== null) {
+      dirty = true
+      url.searchParams.delete(campo)
+    }
+  }
+  if (dirty) {
+    window.history.replaceState({}, '', url.toString())
+  }
 }
 
 export default function FormularioPublico() {
@@ -20,12 +55,13 @@ export default function FormularioPublico() {
   const [enviado, setEnviado] = useState(false)
   const [error, setError] = useState('')
   const [archivo, setArchivo] = useState<File | null>(null)
-
-  // Checkboxes controlados — booleanos puros, no strings
   const [aceptaTerminos, setAceptaTerminos] = useState(false)
   const [aceptaTratamiento, setAceptaTratamiento] = useState(false)
 
   useEffect(() => {
+    // Eliminar query params sensibles de la URL al cargar
+    limpiarURLSospechosa()
+
     supabase.from('vacantes')
       .select('id, titulo, departamento, modalidad')
       .eq('estado', 'activa')
@@ -46,22 +82,23 @@ export default function FormularioPublico() {
     const ciudad = (form.elements.namedItem('ciudad') as HTMLInputElement).value.trim()
     const vacanteId = (form.elements.namedItem('vacante_id') as HTMLSelectElement).value.trim()
 
-    // Validar checkboxes — deben ser true booleano
     if (!aceptaTerminos || !aceptaTratamiento) {
       setError('Debes aceptar los términos y el tratamiento de datos personales')
       setLoading(false)
       return
     }
 
-    // Validar archivo
     if (!archivo) {
       setError('Por favor adjunta tu hoja de vida (PDF o Word)')
       setLoading(false)
       return
     }
 
-    // Validar inputs contra path traversal e inyección
-    for (const [campo, valor] of [['Nombre', nombreCompleto], ['Ciudad', ciudad]]) {
+    // Validar campos de texto contra inyección, path traversal, URLs y XSS
+    for (const [campo, valor] of [
+      ['Nombre', nombreCompleto],
+      ['Ciudad', ciudad],
+    ]) {
       if (esPeligroso(valor)) {
         setError(`El campo ${campo} contiene caracteres no permitidos`)
         setLoading(false)
@@ -69,29 +106,35 @@ export default function FormularioPublico() {
       }
     }
 
-    // Validar teléfono
+    // Email: validar que no contenga patrones de inyección (aparte del formato)
+    if (esPeligroso(email.replace('@', '').replace('.', ''))) {
+      setError('El correo electrónico contiene caracteres no permitidos')
+      setLoading(false)
+      return
+    }
+
+    // Teléfono: solo dígitos, +, -, espacios
     if (telefono && !TELEFONO_REGEX.test(telefono)) {
       setError('El teléfono solo puede contener números, espacios, + y -')
       setLoading(false)
       return
     }
 
-    // Validar vacante_id — debe ser UUID válido o vacío
+    // vacante_id: debe ser UUID válido o vacío
     if (vacanteId && !UUID_REGEX.test(vacanteId)) {
       setError('La vacante seleccionada no es válida')
       setLoading(false)
       return
     }
 
-    // Construir FormData con booleanos explícitos — no strings
     const formData = new FormData()
     formData.append('nombre_completo', nombreCompleto)
     formData.append('email', email)
     formData.append('telefono', telefono)
     formData.append('ciudad', ciudad)
     formData.append('vacante_id', vacanteId)
-    formData.append('acepta_terminos', 'true')          // siempre string "true" validado arriba
-    formData.append('acepta_tratamiento_datos', 'true') // siempre string "true" validado arriba
+    formData.append('acepta_terminos', 'true')
+    formData.append('acepta_tratamiento_datos', 'true')
     formData.append('cv', archivo)
 
     try {
@@ -150,7 +193,6 @@ export default function FormularioPublico() {
 
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6">
 
-          {/* Datos personales */}
           <div>
             <h2 className="text-base font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-100">
               Datos personales
@@ -225,7 +267,6 @@ export default function FormularioPublico() {
             </div>
           </div>
 
-          {/* CV Upload */}
           <div>
             <h2 className="text-base font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-100">
               Hoja de vida
@@ -260,7 +301,6 @@ export default function FormularioPublico() {
             </div>
           </div>
 
-          {/* Consentimiento Ley 1581/2012 — checkboxes controlados */}
           <div className="bg-blue-50 rounded-xl p-5 space-y-3">
             <h3 className="text-sm font-semibold text-blue-900">
               Tratamiento de datos personales — Ley 1581 de 2012

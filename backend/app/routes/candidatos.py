@@ -22,10 +22,25 @@ UUID_REGEX = re.compile(
     re.IGNORECASE
 )
 TELEFONO_REGEX = re.compile(r'^[0-9+\-\s]{7,15}$')
+
+# Patrones ampliados: path traversal, inyección, XSS, SQLi, SSI, Open Redirect
 PATRONES_PELIGROSOS = [
     '../', '..\\', '/etc/', 'c:\\', 'c:/', 'system.ini',
-    'win.ini', 'web-inf', '<script', '{{', '${', '#{', '<%'
+    'win.ini', 'web-inf',
+    # XSS / HTML
+    '<script', '<img', '<svg', 'onerror', 'onload', 'onclick',
+    'javascript:', 'vbscript:', 'data:text',
+    '{{', '${', '#{', '<%',
+    # SSI injection
+    '<!--#', '#exec', '#include',
+    # SQL injection
+    ' union ', ' or 1', ' and 1', '--', ';--',
+    # Open redirect / SSRF — bloqueamos URLs en campos de texto libre
+    'http://', 'https://', '://',
+    # Null bytes
+    '\x00', '%00',
 ]
+
 TIPOS_PERMITIDOS = [
     "application/pdf",
     "application/msword",
@@ -47,6 +62,9 @@ def validar_campos_texto(nombre_completo: str, ciudad: str) -> None:
         raise HTTPException(status_code=400, detail="El nombre es demasiado largo")
     if ciudad and len(ciudad) > 60:
         raise HTTPException(status_code=400, detail="La ciudad es demasiado larga")
+    # Validación extra: solo caracteres alfanuméricos, espacios y puntuación básica
+    if not re.match(r'^[\w\s\-\.\,áéíóúÁÉÍÓÚñÑüÜ]+$', nombre_completo):
+        raise HTTPException(status_code=400, detail="El nombre contiene caracteres no válidos")
 
 
 def validar_telefono(telefono: str) -> None:
@@ -79,10 +97,15 @@ async def aplicar_vacante(
             detail="Debes aceptar los términos y el tratamiento de datos"
         )
 
-    # Validar inputs contra inyección y path traversal
+    # Validar inputs contra inyección, path traversal, XSS, SQLi y Open Redirect
     validar_campos_texto(nombre_completo, ciudad)
     validar_telefono(telefono)
     validar_vacante_id(vacante_id)
+
+    # Validar también el email contra patrones de inyección (además del formato)
+    email_usuario = str(email)
+    if es_peligroso(email_usuario.split('@')[0]):
+        raise HTTPException(status_code=400, detail="El email contiene caracteres no permitidos")
 
     # Validar tipo MIME del CV
     if cv.content_type not in TIPOS_PERMITIDOS:
@@ -92,7 +115,7 @@ async def aplicar_vacante(
         )
 
     # Validar duplicado por email
-    existing = supabase.table("candidatos").select("id").eq("email", email).execute()
+    existing = supabase.table("candidatos").select("id").eq("email", email_usuario.lower()).execute()
     if existing.data:
         raise HTTPException(
             status_code=409,
@@ -105,8 +128,10 @@ async def aplicar_vacante(
         raise HTTPException(status_code=413, detail="El archivo no debe superar 10 MB")
 
     extension = cv.filename.split('.')[-1] if cv.filename else 'pdf'
+    # Limpiar la extensión para evitar path traversal en el nombre de archivo
+    extension = re.sub(r'[^a-zA-Z0-9]', '', extension)[:10]
     timestamp = int(datetime.now().timestamp())
-    nombre_archivo_storage = f"{email.replace('@','_')}_{timestamp}.{extension}"
+    nombre_archivo_storage = f"{email_usuario.replace('@','_')}_{timestamp}.{extension}"
 
     supabase.storage.from_("cvs").upload(
         path=nombre_archivo_storage,
@@ -120,7 +145,7 @@ async def aplicar_vacante(
 
     candidato_data = {
         "nombre_completo": nombre_completo.strip(),
-        "email": email.lower(),
+        "email": email_usuario.lower(),
         "telefono": telefono or None,
         "ciudad": ciudad or None,
         "vacante_id": str(vacante_id) if vacante_id else None,
@@ -142,7 +167,7 @@ async def aplicar_vacante(
     await disparar_webhook_n8n(
         candidato_id=candidato_id,
         candidato_nombre=nombre_completo,
-        candidato_email=email,
+        candidato_email=email_usuario,
         vacante_id=str(vacante_id) if vacante_id else None,
         cv_texto=texto_cv,
         cv_url=cv_url
@@ -205,7 +230,6 @@ async def disparar_webhook_n8n(
         "cv_texto_encoded": True,
         "cv_url": cv_url,
         "timestamp": datetime.now().isoformat(),
-        # CORREGIDO: el secreto va en el header, nunca en el payload
         "vacante_titulo": datos_vacante.get("titulo", ""),
         "vacante_descripcion": datos_vacante.get("descripcion", ""),
         "vacante_habilidades": datos_vacante.get("habilidades_requeridas", []),
@@ -220,7 +244,6 @@ async def disparar_webhook_n8n(
                 webhook_url,
                 json=payload,
                 headers={
-                    # CORREGIDO: secreto en header HTTP, no en el body
                     "X-Webhook-Secret": settings.N8N_WEBHOOK_SECRET,
                     "Content-Type": "application/json"
                 }
@@ -237,7 +260,6 @@ def listar_candidatos(
     limit: int = 50,
     offset: int = 0
 ):
-    # Validar parámetros de query
     estados_validos = [
         "recibido", "en_proceso", "analizado",
         "preseleccionado", "descartado", "banco_talentos"
@@ -265,7 +287,6 @@ def listar_candidatos(
 
 @router.patch("/{candidato_id}/estado", dependencies=[Depends(get_current_user)])
 def actualizar_estado(candidato_id: str, nuevo_estado: str):
-    # Validar UUID del candidato
     if not UUID_REGEX.match(candidato_id):
         raise HTTPException(status_code=400, detail="candidato_id inválido")
 
