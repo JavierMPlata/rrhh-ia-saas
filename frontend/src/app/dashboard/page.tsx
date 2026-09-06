@@ -1,75 +1,116 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
-import type { Candidato, Evaluacion, Vacante, PerfilUsuario } from '@/lib/supabase'
-import Estadisticas from '@/components/Estadisticas'
-import ExportarCandidatos from '@/components/ExportarCandidatos'
-import { registrarAuditoria } from '@/lib/auditoria'
+import type { PerfilUsuario, Auditoria } from '@/lib/supabase'
 
-type CandidatoConEvaluacion = Candidato & {
-  evaluaciones?: Evaluacion[]
-  vacantes?: { titulo: string; departamento: string }
-}
-
-type VacanteConConteo = Vacante & { total_candidatos: number }
-
-export default function DashboardPage() {
+export default function AdminPage() {
   const router = useRouter()
   const supabase = createClient()
 
-  const [perfil, setPerfil] = useState<PerfilUsuario | null>(null)
-  const [candidatos, setCandidatos] = useState<CandidatoConEvaluacion[]>([])
-  const [vacantes, setVacantes] = useState<VacanteConConteo[]>([])
+  const [pestana, setPestana] = useState<'usuarios' | 'auditoria'>('usuarios')
+  const [perfiles, setPerfiles] = useState<PerfilUsuario[]>([])
+  const [auditoria, setAuditoria] = useState<Auditoria[]>([])
   const [loading, setLoading] = useState(true)
+  const [modalUsuario, setModalUsuario] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) { router.push('/login'); return }
-
-      const { data: perfilData } = await supabase
+      const { data: perfil } = await supabase
         .from('perfiles_usuario')
-        .select('*')
+        .select('rol')
         .eq('user_id', user.id)
         .single()
-      setPerfil(perfilData as PerfilUsuario)
-
-      await registrarAuditoria('acceso_dashboard')
-      await cargarDatos()
+      if (!perfil || perfil.rol !== 'admin') {
+        router.push('/dashboard')
+        return
+      }
+      cargarDatos()
     })
   }, [])
 
   const cargarDatos = async () => {
     setLoading(true)
-    const [candidatosRes, vacantesRes] = await Promise.all([
-      supabase.from('candidatos')
-        .select('*, evaluaciones(*), vacantes(titulo, departamento)')
-        .order('created_at', { ascending: false }),
-      supabase.from('vacantes').select('*').order('created_at', { ascending: false })
+    const [perfilesRes, auditoriaRes] = await Promise.all([
+      supabase.from('perfiles_usuario').select('*').order('created_at', { ascending: false }),
+      supabase.from('auditoria').select('*').order('created_at', { ascending: false }).limit(100)
     ])
-
-    const candidatosData = (candidatosRes.data || []) as CandidatoConEvaluacion[]
-    setCandidatos(candidatosData)
-
-    const vacantesConConteo = ((vacantesRes.data || []) as Vacante[]).map(v => ({
-      ...v,
-      total_candidatos: candidatosData.filter(c => c.vacante_id === v.id).length
-    }))
-    setVacantes(vacantesConConteo)
+    if (perfilesRes.data) setPerfiles(perfilesRes.data as PerfilUsuario[])
+    if (auditoriaRes.data) setAuditoria(auditoriaRes.data as Auditoria[])
     setLoading(false)
   }
 
-  const cerrarSesion = async () => {
-    await registrarAuditoria('cierre_sesion')
-    await supabase.auth.signOut()
-    router.push('/login')
+  const cambiarRol = async (userId: string, nuevoRol: string) => {
+    await supabase.from('perfiles_usuario').update({ rol: nuevoRol }).eq('user_id', userId)
+    cargarDatos()
   }
 
-  const estadoColor: Record<string, string> = {
-    activa: 'bg-green-100 text-green-700',
-    pausada: 'bg-amber-100 text-amber-700',
-    cerrada: 'bg-red-100 text-red-700',
+  const toggleActivo = async (userId: string, activo: boolean) => {
+    await supabase.from('perfiles_usuario').update({ activo: !activo }).eq('user_id', userId)
+    cargarDatos()
+  }
+
+  const formatearAccion = (accion: string): string => {
+    const etiquetas: Record<string, string> = {
+      'acceso_dashboard': 'Acceso al sistema',
+      'cierre_sesion': 'Cierre de sesión',
+      'cambio_estado_candidato': 'Cambio de estado',
+      'agregar_nota_candidato': 'Nota agregada',
+      'ver_cv': 'CV consultado',
+      'editar_vacante': 'Vacante editada',
+      'crear_vacante': 'Vacante creada',
+      'cambio_estado_vacante': 'Estado de vacante',
+    }
+    return etiquetas[accion] || accion
+  }
+
+  const formatearDetalle = (accion: string, detalle: any): string => {
+    if (!detalle) return '—'
+    switch (accion) {
+      case 'cambio_estado_candidato':
+        return `${detalle.candidato}: ${detalle.estado_anterior} → ${detalle.estado_nuevo}`
+      case 'agregar_nota_candidato':
+        return `Nota agregada en perfil de ${detalle.candidato}`
+      case 'ver_cv':
+        return `CV de ${detalle.candidato} fue consultado`
+      case 'editar_vacante':
+        return `Vacante "${detalle.titulo}" fue modificada`
+      case 'crear_vacante':
+        return `Nueva vacante creada: "${detalle.titulo}"`
+      case 'cambio_estado_vacante':
+        return `Vacante cambió su estado a: ${detalle.estado_nuevo}`
+      case 'acceso_dashboard':
+        return 'Ingresó al panel RRHH'
+      case 'cierre_sesion':
+        return 'Cerró sesión del sistema'
+      default:
+        return JSON.stringify(detalle)
+    }
+  }
+
+  const accionColor = (accion: string): string => {
+    if (accion.includes('crear')) return 'bg-green-100 text-green-700'
+    if (accion.includes('editar')) return 'bg-blue-100 text-blue-700'
+    if (accion.includes('eliminar')) return 'bg-red-100 text-red-700'
+    if (accion.includes('cambio')) return 'bg-amber-100 text-amber-700'
+    if (accion.includes('acceso')) return 'bg-gray-100 text-gray-600'
+    if (accion.includes('cierre')) return 'bg-red-50 text-red-500'
+    if (accion.includes('nota')) return 'bg-purple-100 text-purple-700'
+    if (accion.includes('cv')) return 'bg-teal-100 text-teal-700'
+    return 'bg-indigo-100 text-indigo-700'
+  }
+
+  const ROL_COLOR: Record<string, string> = {
+    admin: 'bg-purple-100 text-purple-700',
+    rrhh_senior: 'bg-blue-100 text-blue-700',
+    rrhh_junior: 'bg-gray-100 text-gray-700',
+  }
+
+  const ROL_ETIQUETA: Record<string, string> = {
+    admin: 'Administrador',
+    rrhh_senior: 'RRHH Senior',
+    rrhh_junior: 'RRHH Junior',
   }
 
   if (loading) {
@@ -82,49 +123,266 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <span className="font-semibold text-gray-900 text-sm">Panel de RRHH</span>
-          {perfil?.rol === 'admin' && (
-            <Link href="/dashboard/admin" className="text-indigo-600 hover:underline text-sm">
-              Administración
-            </Link>
-          )}
-        </div>
-        <div className="flex items-center gap-4">
-          <ExportarCandidatos candidatos={candidatos} />
-          <button onClick={cerrarSesion} className="text-gray-500 hover:text-gray-900 text-sm">
-            Cerrar sesión
-          </button>
-        </div>
+      <nav className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-4">
+        <button
+          onClick={() => router.push('/dashboard')}
+          className="text-gray-500 hover:text-gray-900 text-sm flex items-center gap-1"
+        >
+          ← Volver
+        </button>
+        <span className="text-gray-300">|</span>
+        <span className="font-semibold text-gray-900 text-sm">Administración</span>
+        <span className="px-2.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+          Admin
+        </span>
       </nav>
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">
-        <Estadisticas candidatos={candidatos} />
-
-        <div>
-          <h2 className="text-base font-semibold text-gray-800 mb-4">Vacantes</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {vacantes.map(v => (
-              <Link
-                key={v.id}
-                href={`/dashboard/vacante/${v.id}`}
-                className="bg-white rounded-xl border border-gray-100 p-5 hover:shadow-sm transition-shadow"
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="font-medium text-gray-900">{v.titulo}</h3>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${estadoColor[v.estado]}`}>
-                    {v.estado}
-                  </span>
-                </div>
-                <p className="text-gray-500 text-sm">{v.departamento} · {v.modalidad}</p>
-                <p className="text-indigo-600 text-sm font-medium mt-3">
-                  {v.total_candidatos} candidato{v.total_candidatos !== 1 ? 's' : ''}
-                </p>
-              </Link>
-            ))}
-          </div>
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+        <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-xl w-fit">
+          {[
+            { id: 'usuarios', label: `Usuarios (${perfiles.length})` },
+            { id: 'auditoria', label: `Auditoría (${auditoria.length})` },
+          ].map(p => (
+            <button
+              key={p.id}
+              onClick={() => setPestana(p.id as any)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                ${pestana === p.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
+
+        {/* Pestaña Usuarios */}
+        {pestana === 'usuarios' && (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-base font-semibold text-gray-800">Usuarios del sistema</h2>
+              <button
+                onClick={() => setModalUsuario(true)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                + Invitar usuario
+              </button>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Usuario</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Rol</th>
+                    <th className="text-center px-4 py-3 font-medium text-gray-600">Estado</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Desde</th>
+                    <th className="text-center px-4 py-3 font-medium text-gray-600">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {perfiles.map(p => (
+                    <tr key={p.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900">{p.nombre_completo}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${ROL_COLOR[p.rol]}`}>
+                          {ROL_ETIQUETA[p.rol]}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium
+                          ${p.activo ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          {p.activo ? 'Activo' : 'Inactivo'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-400 text-xs">
+                        {new Date(p.created_at).toLocaleDateString('es-CO')}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <select
+                            value={p.rol}
+                            onChange={e => cambiarRol(p.user_id, e.target.value)}
+                            className="px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-900 bg-white"
+                          >
+                            <option value="admin">Admin</option>
+                            <option value="rrhh_senior">RRHH Senior</option>
+                            <option value="rrhh_junior">RRHH Junior</option>
+                          </select>
+                          <button
+                            onClick={() => toggleActivo(p.user_id, p.activo)}
+                            className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors
+                              ${p.activo
+                                ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                                : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
+                          >
+                            {p.activo ? 'Desactivar' : 'Activar'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Pestaña Auditoría */}
+        {pestana === 'auditoria' && (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-base font-semibold text-gray-800">Historial de actividad</h2>
+              <span className="text-xs text-gray-400">Últimos 100 registros</span>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              {auditoria.length === 0 ? (
+                <div className="p-12 text-center text-gray-400">
+                  No hay registros de auditoría aún.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-100">
+                      <tr>
+                        <th className="text-left px-4 py-3 font-medium text-gray-600">Usuario</th>
+                        <th className="text-left px-4 py-3 font-medium text-gray-600">Acción</th>
+                        <th className="text-left px-4 py-3 font-medium text-gray-600">Detalle</th>
+                        <th className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">Fecha y hora</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {auditoria.map(a => (
+                        <tr key={a.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="text-gray-700 text-xs font-medium">{a.user_email}</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap
+                              ${accionColor(a.accion)}`}>
+                              {formatearAccion(a.accion)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-xs max-w-sm">
+                            {formatearDetalle(a.accion, a.detalle)}
+                          </td>
+                          <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
+                            {new Date(a.created_at).toLocaleString('es-CO', {
+                              day: '2-digit', month: 'short', year: 'numeric',
+                              hour: '2-digit', minute: '2-digit'
+                            })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {modalUsuario && (
+        <ModalInvitarUsuario
+          onClose={() => setModalUsuario(false)}
+          onInvitado={() => { setModalUsuario(false); cargarDatos() }}
+        />
+      )}
+    </div>
+  )
+}
+
+function ModalInvitarUsuario({
+  onClose,
+  onInvitado
+}: {
+  onClose: () => void
+  onInvitado: () => void
+}) {
+  const [email, setEmail] = useState('')
+  const [nombre, setNombre] = useState('')
+  const [rol, setRol] = useState('rrhh_junior')
+  const [password, setPassword] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState('')
+  const [exito, setExito] = useState(false)
+
+  const handleInvitar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setGuardando(true)
+    setError('')
+    try {
+      const res = await fetch('/api/crear-usuario', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, nombre, rol })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error al crear usuario')
+      setExito(true)
+      setTimeout(onInvitado, 1500)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+        <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">Crear nuevo usuario RRHH</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+        </div>
+        <form onSubmit={handleInvitar} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Nombre completo</label>
+            <input required value={nombre} onChange={e => setNombre(e.target.value)}
+              placeholder="María García"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
+            <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
+              placeholder="maria@empresa.com"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Contraseña temporal</label>
+            <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
+              placeholder="Mínimo 8 caracteres"
+              minLength={8}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Rol</label>
+            <select value={rol} onChange={e => setRol(e.target.value)}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="rrhh_junior">RRHH Junior</option>
+              <option value="rrhh_senior">RRHH Senior</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </div>
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
+          )}
+          {exito && (
+            <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg">
+              ✓ Usuario creado exitosamente
+            </div>
+          )}
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose}
+              className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-lg text-sm font-medium">
+              Cancelar
+            </button>
+            <button type="submit" disabled={guardando}
+              className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg text-sm font-medium">
+              {guardando ? 'Creando...' : 'Crear usuario'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )
