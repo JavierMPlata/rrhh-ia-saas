@@ -7,46 +7,10 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const TELEFONO_REGEX = /^[0-9+\-\s]{7,15}$/
-
-// Patrones ampliados: path traversal, inyección, URLs, XSS, SQLi, SSI
-const PATRONES_PELIGROSOS = [
-  '../', '..\\', '/etc/', 'c:\\', 'c:/', 'system.ini', 'win.ini',
-  'web-inf', '<', '{%', '{{', '${', '#{',
-  // XSS / HTML injection
-  'script', 'onerror', 'onload', 'onclick', 'alert(', 'prompt(', 'confirm(',
-  'javascript:', 'vbscript:', 'data:text/html',
-  // SSI injection
-  '<!--#', '#exec', '#include',
-  // SQL injection básico
-  'union ', ' or ', ' and ', '--', ';--', "'; ", '"; ',
-  // Open redirect / SSRF
-  'http://', 'https://', 'www.',
-  // Null bytes
-  '\x00', '%00',
-]
+const PATRONES_PELIGROSOS = ['../', '..\\', '/etc/', 'c:\\', 'c:/', 'system.ini', 'win.ini', 'web-inf', '<', '{%', '{{', '${', '#{']
 
 function esPeligroso(valor: string): boolean {
-  const lower = valor.toLowerCase()
-  return PATRONES_PELIGROSOS.some(p => lower.includes(p.toLowerCase()))
-}
-
-/**
- * Elimina TODOS los query params al montar.
- *
- * El formulario público es una SPA que no consume ningún parámetro de URL,
- * por lo tanto cualquier query param es innecesario o es un intento de
- * reflected parameter injection / XSS reflejado.
- *
- * Esto es consistente con el comportamiento de /dashboard/page.tsx.
- */
-function limpiarURLSospechosa() {
-  if (typeof window === 'undefined') return
-  const url = new URL(window.location.href)
-
-  if (url.searchParams.toString().length > 0) {
-    url.search = ''
-    window.history.replaceState({}, '', url.toString())
-  }
+  return PATRONES_PELIGROSOS.some(p => valor.toLowerCase().includes(p.toLowerCase()))
 }
 
 export default function FormularioPublico() {
@@ -56,13 +20,12 @@ export default function FormularioPublico() {
   const [enviado, setEnviado] = useState(false)
   const [error, setError] = useState('')
   const [archivo, setArchivo] = useState<File | null>(null)
+
+  // Checkboxes controlados — booleanos puros, no strings
   const [aceptaTerminos, setAceptaTerminos] = useState(false)
   const [aceptaTratamiento, setAceptaTratamiento] = useState(false)
 
   useEffect(() => {
-    // Eliminar TODOS los query params de la URL al cargar
-    limpiarURLSospechosa()
-
     supabase.from('vacantes')
       .select('id, titulo, departamento, modalidad')
       .eq('estado', 'activa')
@@ -83,23 +46,22 @@ export default function FormularioPublico() {
     const ciudad = (form.elements.namedItem('ciudad') as HTMLInputElement).value.trim()
     const vacanteId = (form.elements.namedItem('vacante_id') as HTMLSelectElement).value.trim()
 
+    // Validar checkboxes — deben ser true booleano
     if (!aceptaTerminos || !aceptaTratamiento) {
       setError('Debes aceptar los términos y el tratamiento de datos personales')
       setLoading(false)
       return
     }
 
+    // Validar archivo
     if (!archivo) {
       setError('Por favor adjunta tu hoja de vida (PDF o Word)')
       setLoading(false)
       return
     }
 
-    // Validar campos de texto contra inyección, path traversal, URLs y XSS
-    for (const [campo, valor] of [
-      ['Nombre', nombreCompleto],
-      ['Ciudad', ciudad],
-    ]) {
+    // Validar inputs contra path traversal e inyección
+    for (const [campo, valor] of [['Nombre', nombreCompleto], ['Ciudad', ciudad]]) {
       if (esPeligroso(valor)) {
         setError(`El campo ${campo} contiene caracteres no permitidos`)
         setLoading(false)
@@ -107,35 +69,29 @@ export default function FormularioPublico() {
       }
     }
 
-    // Email: validar que no contenga patrones de inyección (aparte del formato)
-    if (esPeligroso(email.replace('@', '').replace('.', ''))) {
-      setError('El correo electrónico contiene caracteres no permitidos')
-      setLoading(false)
-      return
-    }
-
-    // Teléfono: solo dígitos, +, -, espacios
+    // Validar teléfono
     if (telefono && !TELEFONO_REGEX.test(telefono)) {
       setError('El teléfono solo puede contener números, espacios, + y -')
       setLoading(false)
       return
     }
 
-    // vacante_id: debe ser UUID válido o vacío
+    // Validar vacante_id — debe ser UUID válido o vacío
     if (vacanteId && !UUID_REGEX.test(vacanteId)) {
       setError('La vacante seleccionada no es válida')
       setLoading(false)
       return
     }
 
+    // Construir FormData con booleanos explícitos — no strings
     const formData = new FormData()
     formData.append('nombre_completo', nombreCompleto)
     formData.append('email', email)
     formData.append('telefono', telefono)
     formData.append('ciudad', ciudad)
     formData.append('vacante_id', vacanteId)
-    formData.append('acepta_terminos', 'true')
-    formData.append('acepta_tratamiento_datos', 'true')
+    formData.append('acepta_terminos', 'true')          // siempre string "true" validado arriba
+    formData.append('acepta_tratamiento_datos', 'true') // siempre string "true" validado arriba
     formData.append('cv', archivo)
 
     try {
@@ -156,20 +112,23 @@ export default function FormularioPublico() {
 
   if (enviado) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-white flex items-center justify-center p-4">
-        <div className="max-w-md w-full text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4 relative overflow-hidden">
+        <div className="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-orange-500/20 blur-3xl" />
+        <div className="absolute -bottom-24 -right-24 w-96 h-96 rounded-full bg-orange-600/20 blur-3xl" />
+        <div className="max-w-md w-full text-center relative z-10">
+          <div className="w-16 h-16 bg-orange-500 rounded-2xl flex items-center justify-center mx-auto mb-5 rotate-3">
+            <svg className="w-8 h-8 text-gray-950" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">¡Aplicación recibida!</h2>
-          <p className="text-gray-600 mb-6">
-            Gracias por tu interés. Nuestro equipo revisará tu perfil y te contactaremos pronto.
+          <h2 className="text-2xl font-bold text-white mb-2">¡Aplicación recibida!</h2>
+          <p className="text-gray-400 mb-8">
+            Gracias por tu interés en la Universidad de San Buenaventura Bogotá.
+            Nuestro equipo revisará tu perfil y te contactaremos pronto.
           </p>
           <button
             onClick={() => setEnviado(false)}
-            className="text-indigo-600 hover:underline text-sm"
+            className="text-orange-400 hover:text-orange-300 text-sm font-medium border border-orange-500/40 hover:border-orange-400 rounded-lg px-5 py-2.5 transition-colors"
           >
             Aplicar a otra vacante
           </button>
@@ -179,25 +138,44 @@ export default function FormularioPublico() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-white py-12 px-4">
-      <div className="max-w-2xl mx-auto">
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center gap-2 bg-indigo-100 text-indigo-700 text-sm px-3 py-1 rounded-full mb-4">
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse inline-block"/>
+    <div className="min-h-screen bg-white">
+      {/* Hero institucional */}
+      <div className="bg-gray-950 relative overflow-hidden">
+        <div className="absolute -top-32 right-0 w-96 h-96 rounded-full bg-orange-500/20 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 w-64 h-64 rounded-full bg-orange-600/10 blur-3xl" />
+        <div className="max-w-3xl mx-auto px-4 pt-14 pb-20 relative z-10">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-10 h-10 rounded-lg bg-orange-500 flex items-center justify-center text-gray-950 text-xs font-bold">
+              USB
+            </div>
+            <div className="leading-tight">
+              <p className="text-white text-sm font-semibold">Universidad de San Buenaventura</p>
+              <p className="text-orange-400 text-xs">Bogotá D.C. · Talento Humano</p>
+            </div>
+          </div>
+          <div className="inline-flex items-center gap-2 bg-white/10 text-orange-300 text-xs font-medium px-3 py-1 rounded-full mb-5">
+            <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse inline-block"/>
             Convocatoria abierta
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">Aplica a nuestra startup</h1>
-          <p className="text-gray-500 mt-2">
-            Completa el formulario y adjunta tu CV. Nuestro sistema con IA analizará tu perfil.
+          <h1 className="text-3xl sm:text-4xl font-bold text-white leading-tight max-w-xl">
+            Construye tu carrera en la comunidad franciscana
+          </h1>
+          <p className="text-gray-400 mt-3 max-w-lg text-sm leading-relaxed">
+            Completa el formulario y adjunta tu hoja de vida. Nuestro sistema con
+            inteligencia artificial analizará tu perfil frente a la vacante elegida.
           </p>
         </div>
+      </div>
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6">
+      <div className="max-w-2xl mx-auto px-4 -mt-10 pb-16 relative z-10">
+        <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-xl shadow-black/5 border border-gray-100 p-8 space-y-6">
 
+          {/* Datos personales */}
           <div>
-            <h2 className="text-base font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-100">
-              Datos personales
-            </h2>
+            <div className="flex items-center gap-2 mb-4 pb-2 border-b border-gray-100">
+              <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 text-xs font-bold flex items-center justify-center">1</span>
+              <h2 className="text-base font-semibold text-gray-800">Datos personales</h2>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -209,7 +187,7 @@ export default function FormularioPublico() {
                   required
                   maxLength={100}
                   placeholder="Ej: María García López"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
                 />
               </div>
               <div>
@@ -222,7 +200,7 @@ export default function FormularioPublico() {
                   required
                   maxLength={100}
                   placeholder="tu@email.com"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
                 />
               </div>
               <div>
@@ -234,7 +212,7 @@ export default function FormularioPublico() {
                   type="tel"
                   maxLength={15}
                   placeholder="+57 300 123 4567"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
                 />
               </div>
               <div>
@@ -246,7 +224,7 @@ export default function FormularioPublico() {
                   type="text"
                   maxLength={60}
                   placeholder="Bogotá"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
                 />
               </div>
               <div>
@@ -255,7 +233,7 @@ export default function FormularioPublico() {
                 </label>
                 <select
                   name="vacante_id"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 bg-white"
                 >
                   <option value="">Selecciona una vacante</option>
                   {vacantes.map(v => (
@@ -268,13 +246,15 @@ export default function FormularioPublico() {
             </div>
           </div>
 
+          {/* CV Upload */}
           <div>
-            <h2 className="text-base font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-100">
-              Hoja de vida
-            </h2>
+            <div className="flex items-center gap-2 mb-4 pb-2 border-b border-gray-100">
+              <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 text-xs font-bold flex items-center justify-center">2</span>
+              <h2 className="text-base font-semibold text-gray-800">Hoja de vida</h2>
+            </div>
             <div
               className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors
-                ${archivo ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 hover:border-indigo-300'}`}
+                ${archivo ? 'border-orange-400 bg-orange-50' : 'border-gray-200 hover:border-orange-300 hover:bg-orange-50/40'}`}
               onClick={() => document.getElementById('cv-input')?.click()}
             >
               <input
@@ -287,7 +267,7 @@ export default function FormularioPublico() {
               {archivo ? (
                 <>
                   <div className="text-3xl mb-2">📄</div>
-                  <p className="text-sm font-medium text-indigo-700">{archivo.name}</p>
+                  <p className="text-sm font-medium text-orange-700">{archivo.name}</p>
                   <p className="text-xs text-gray-500 mt-1">
                     {(archivo.size / 1024 / 1024).toFixed(2)} MB — Clic para cambiar
                   </p>
@@ -302,47 +282,54 @@ export default function FormularioPublico() {
             </div>
           </div>
 
-          <div className="bg-blue-50 rounded-xl p-5 space-y-3">
-            <h3 className="text-sm font-semibold text-blue-900">
-              Tratamiento de datos personales — Ley 1581 de 2012
-            </h3>
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={aceptaTerminos}
-                onChange={(e) => setAceptaTerminos(e.target.checked)}
-                required
-                className="mt-0.5 h-4 w-4 text-indigo-600 border-gray-300 rounded"
-              />
-              <span className="text-xs text-blue-800">
-                Acepto los términos y condiciones del proceso de selección y declaro que
-                la información suministrada es veraz y comprobable. *
-              </span>
-            </label>
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={aceptaTratamiento}
-                onChange={(e) => setAceptaTratamiento(e.target.checked)}
-                required
-                className="mt-0.5 h-4 w-4 text-indigo-600 border-gray-300 rounded"
-              />
-              <span className="text-xs text-blue-800">
-                Autorizo el tratamiento de mis datos personales con fines de selección de personal,
-                de acuerdo con la{' '}
-                <a href="/privacidad" target="_blank" className="underline font-medium hover:text-blue-900">
-                  Política de Privacidad
-                </a>
-                {' '}y la Ley Estatutaria 1581 de 2012. *
-              </span>
-            </label>
-            <p className="text-xs text-blue-700 pt-1 border-t border-blue-200">
-              Puedes ejercer tu derecho al olvido en cualquier momento desde{' '}
-              <a href="/eliminar-datos" target="_blank" className="underline font-medium hover:text-blue-900">
-                esta página
-              </a>.
-              Tus datos serán conservados máximo 2 años o hasta que solicites su eliminación.
-            </p>
+          {/* Consentimiento Ley 1581/2012 — checkboxes controlados */}
+          <div>
+            <div className="flex items-center gap-2 mb-4 pb-2 border-b border-gray-100">
+              <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 text-xs font-bold flex items-center justify-center">3</span>
+              <h2 className="text-base font-semibold text-gray-800">Consentimiento</h2>
+            </div>
+            <div className="bg-gray-950 rounded-xl p-5 space-y-3">
+              <h3 className="text-sm font-semibold text-orange-400">
+                Tratamiento de datos personales — Ley 1581 de 2012
+              </h3>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={aceptaTerminos}
+                  onChange={(e) => setAceptaTerminos(e.target.checked)}
+                  required
+                  className="mt-0.5 h-4 w-4 text-orange-500 border-gray-500 rounded accent-orange-500"
+                />
+                <span className="text-xs text-gray-300">
+                  Acepto los términos y condiciones del proceso de selección y declaro que
+                  la información suministrada es veraz y comprobable. *
+                </span>
+              </label>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={aceptaTratamiento}
+                  onChange={(e) => setAceptaTratamiento(e.target.checked)}
+                  required
+                  className="mt-0.5 h-4 w-4 text-orange-500 border-gray-500 rounded accent-orange-500"
+                />
+                <span className="text-xs text-gray-300">
+                  Autorizo el tratamiento de mis datos personales con fines de selección de personal,
+                  de acuerdo con la{' '}
+                  <a href="/privacidad" target="_blank" className="underline font-medium text-orange-400 hover:text-orange-300">
+                    Política de Privacidad
+                  </a>
+                  {' '}y la Ley Estatutaria 1581 de 2012. *
+                </span>
+              </label>
+              <p className="text-xs text-gray-400 pt-1 border-t border-gray-800">
+                Puedes ejercer tu derecho al olvido en cualquier momento desde{' '}
+                <a href="/eliminar-datos" target="_blank" className="underline font-medium text-orange-400 hover:text-orange-300">
+                  esta página
+                </a>.
+                Tus datos serán conservados máximo 2 años o hasta que solicites su eliminación.
+              </p>
+            </div>
           </div>
 
           {error && (
@@ -354,8 +341,8 @@ export default function FormularioPublico() {
           <button
             type="submit"
             disabled={loading || !archivo || !aceptaTerminos || !aceptaTratamiento}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300
-                       text-white font-medium py-3 px-4 rounded-xl text-sm
+            className="w-full bg-orange-500 hover:bg-orange-400 disabled:bg-gray-200 disabled:text-gray-400
+                       text-gray-950 font-semibold py-3 px-4 rounded-xl text-sm
                        transition-colors flex items-center justify-center gap-2"
           >
             {loading ? (
@@ -369,6 +356,11 @@ export default function FormularioPublico() {
             ) : 'Enviar aplicación →'}
           </button>
         </form>
+
+        <p className="text-center text-xs text-gray-400 mt-6">
+          ¿Eres parte del equipo de RRHH?{' '}
+          <a href="/login" className="text-orange-600 hover:underline font-medium">Inicia sesión aquí</a>
+        </p>
       </div>
     </div>
   )
