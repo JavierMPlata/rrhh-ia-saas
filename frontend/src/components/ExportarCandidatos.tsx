@@ -85,7 +85,7 @@ export default function ExportarCandidatos({
         if (ws[celda]) {
           ws[celda].s = {
             font: { bold: true },
-            fill: { fgColor: { rgb: '6366F1' } }
+            fill: { fgColor: { rgb: 'EA580C' } }
           }
         }
       }
@@ -115,7 +115,7 @@ export default function ExportarCandidatos({
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
 
       // Encabezado
-      doc.setFillColor(99, 102, 241)
+      doc.setFillColor(234, 88, 12)
       doc.rect(0, 0, 297, 20, 'F')
       doc.setTextColor(255, 255, 255)
       doc.setFontSize(14)
@@ -160,7 +160,7 @@ export default function ExportarCandidatos({
           cellPadding: 2,
         },
         headStyles: {
-          fillColor: [99, 102, 241],
+          fillColor: [234, 88, 12],
           textColor: 255,
           fontStyle: 'bold',
           fontSize: 8,
@@ -191,7 +191,7 @@ export default function ExportarCandidatos({
           if (data.column.index === 5 && data.section === 'body') {
             const rec = data.cell.text[0]
             if (rec === 'contratar') data.cell.styles.textColor = [16, 185, 129]
-            else if (rec === 'entrevistar') data.cell.styles.textColor = [99, 102, 241]
+            else if (rec === 'entrevistar') data.cell.styles.textColor = [234, 88, 12]
             else if (rec === 'descartar') data.cell.styles.textColor = [239, 68, 68]
           }
         }
