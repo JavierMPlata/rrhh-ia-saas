@@ -64,25 +64,25 @@ export default function DetalleVacantePage() {
 
   const recomColor: Record<string, string> = {
     contratar: 'bg-green-100 text-green-700',
-    entrevistar: 'bg-blue-100 text-blue-700',
+    entrevistar: 'bg-orange-100 text-orange-700',
     descartar: 'bg-red-100 text-red-700',
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full"/>
+      <div className="min-h-screen bg-orange-50/40 flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full"/>
       </div>
     )
   }
 
   if (!vacante) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-orange-50/40 flex items-center justify-center">
         <div className="text-center">
           <p className="text-gray-500 mb-4">Vacante no encontrada</p>
           <button onClick={() => router.push('/dashboard')}
-            className="text-indigo-600 hover:underline text-sm">
+            className="text-orange-600 hover:underline text-sm">
             Volver al dashboard
           </button>
         </div>
@@ -98,18 +98,21 @@ export default function DetalleVacantePage() {
     : 0
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-orange-50/40">
       {/* Navbar */}
-      <nav className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-4">
+      <nav className="bg-gray-950 border-b border-gray-800 px-6 py-3 flex items-center gap-4 sticky top-0 z-30">
+        <div className="w-9 h-9 rounded-lg bg-orange-500 flex items-center justify-center text-gray-950 text-xs font-bold tracking-tight shrink-0">
+          USB
+        </div>
         <button
           onClick={() => router.push('/dashboard')}
-          className="text-gray-500 hover:text-gray-900 text-sm flex items-center gap-1"
+          className="text-gray-400 hover:text-white text-sm flex items-center gap-1 shrink-0"
         >
           ← Volver
         </button>
-        <span className="text-gray-300">|</span>
-        <span className="font-semibold text-gray-900 text-sm">{vacante.titulo}</span>
-        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${estadoColor[vacante.estado]}`}>
+        <span className="text-gray-700">|</span>
+        <span className="font-semibold text-white text-sm truncate">{vacante.titulo}</span>
+        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium capitalize shrink-0 ${estadoColor[vacante.estado]}`}>
           {vacante.estado}
         </span>
       </nav>
@@ -117,7 +120,7 @@ export default function DetalleVacantePage() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
         {/* Info de la vacante */}
-        <div className="bg-white rounded-xl border border-gray-100 p-6">
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
           <div className="flex items-start justify-between mb-4">
             <div>
               <h1 className="text-xl font-bold text-gray-900">{vacante.titulo}</h1>
@@ -141,7 +144,7 @@ export default function DetalleVacantePage() {
                 <p className="text-xs text-gray-500">Preseleccionados</p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-indigo-600">{scorePromedio}</p>
+                <p className="text-2xl font-bold text-orange-600">{scorePromedio}</p>
                 <p className="text-xs text-gray-500">Score prom.</p>
               </div>
             </div>
@@ -151,7 +154,7 @@ export default function DetalleVacantePage() {
 
           <div className="flex flex-wrap gap-2">
             {vacante.habilidades_requeridas?.map((h, i) => (
-              <span key={i} className="px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-medium">
+              <span key={i} className="px-2.5 py-1 bg-orange-50 text-orange-700 rounded-full text-xs font-medium">
                 {h}
               </span>
             ))}
@@ -167,7 +170,7 @@ export default function DetalleVacantePage() {
             {candidatosComparar.length >= 2 && (
               <button
                 onClick={() => setModalComparar(true)}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors"
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-medium transition-colors"
               >
                 Comparar {candidatosComparar.length} candidatos
               </button>
@@ -184,32 +187,32 @@ export default function DetalleVacantePage() {
         </div>
 
         {candidatosComparar.length > 0 && (
-          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-sm text-indigo-700">
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-sm text-orange-700">
             Seleccionados para comparar: {candidatosComparar.map(c => c.nombre_completo).join(', ')}
             {candidatosComparar.length < 2 && ' — Selecciona al menos 2'}
           </div>
         )}
 
         {/* Tabla de candidatos */}
-        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           {candidatos.length === 0 ? (
             <div className="p-12 text-center text-gray-400">
               No hay candidatos para esta vacante aún.
             </div>
           ) : (
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-100">
+              <thead className="bg-gray-950 border-b border-gray-800">
                 <tr>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600 w-8">
+                  <th className="text-left px-4 py-3 font-medium text-gray-300 w-8">
                     <input type="checkbox" className="opacity-0"/>
                   </th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Candidato</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Estado</th>
-                  <th className="text-center px-4 py-3 font-medium text-gray-600">Score IA</th>
-                  <th className="text-center px-4 py-3 font-medium text-gray-600">Habilidades</th>
-                  <th className="text-center px-4 py-3 font-medium text-gray-600">Exp.</th>
-                  <th className="text-center px-4 py-3 font-medium text-gray-600">IA dice</th>
-                  <th className="text-center px-4 py-3 font-medium text-gray-600">Acciones</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-300">Candidato</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-300">Estado</th>
+                  <th className="text-center px-4 py-3 font-medium text-gray-300">Score IA</th>
+                  <th className="text-center px-4 py-3 font-medium text-gray-300">Habilidades</th>
+                  <th className="text-center px-4 py-3 font-medium text-gray-300">Exp.</th>
+                  <th className="text-center px-4 py-3 font-medium text-gray-300">IA dice</th>
+                  <th className="text-center px-4 py-3 font-medium text-gray-300">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -223,13 +226,13 @@ export default function DetalleVacantePage() {
                     const score = ev?.score_total ?? null
                     const seleccionado = candidatosComparar.find(x => x.id === c.id)
                     return (
-                      <tr key={c.id} className={`hover:bg-gray-50 transition-colors ${seleccionado ? 'bg-indigo-50' : ''}`}>
+                      <tr key={c.id} className={`hover:bg-gray-50 transition-colors ${seleccionado ? 'bg-orange-50' : ''}`}>
                         <td className="px-4 py-3">
                           <input
                             type="checkbox"
                             checked={!!seleccionado}
                             onChange={() => toggleComparar(c)}
-                            className="rounded border-gray-300 text-indigo-600"
+                            className="rounded border-gray-300 text-orange-600"
                           />
                         </td>
                         <td className="px-4 py-3">
@@ -263,8 +266,8 @@ export default function DetalleVacantePage() {
                         <td className="px-4 py-3 text-center">
                           <button
                             onClick={() => setModalEvaluar(c)}
-                            className="text-indigo-600 hover:text-indigo-800 text-xs font-medium
-                                       bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
+                            className="text-orange-600 hover:text-orange-800 text-xs font-medium
+                                       bg-orange-50 hover:bg-orange-100 px-3 py-1.5 rounded-lg transition-colors"
                           >
                             Evaluar
                           </button>
@@ -357,7 +360,7 @@ function ModalComparar({
                     {ev?.recomendacion && (
                       <span className={`inline-flex mt-2 px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
                         ${ev.recomendacion === 'contratar' ? 'bg-green-100 text-green-700'
-                          : ev.recomendacion === 'entrevistar' ? 'bg-blue-100 text-blue-700'
+                          : ev.recomendacion === 'entrevistar' ? 'bg-orange-100 text-orange-700'
                           : 'bg-red-100 text-red-700'}`}>
                         {ev.recomendacion}
                       </span>
@@ -534,7 +537,7 @@ Notas: ${evaluacion.notas_entrevista}
         step="0.5"
         value={value}
         onChange={e => setEvaluacion(prev => ({ ...prev, [field]: parseFloat(e.target.value) }))}
-        className="w-full accent-indigo-600"
+        className="w-full accent-orange-600"
       />
       <div className="flex justify-between text-xs text-gray-400 mt-0.5">
         <span>0</span><span>5</span><span>10</span>
@@ -556,7 +559,7 @@ Notas: ${evaluacion.notas_entrevista}
         <div className="p-6 space-y-5">
           {/* Score promedio manual */}
           {promedioManual > 0 && (
-            <div className="text-center bg-indigo-50 rounded-xl py-4">
+            <div className="text-center bg-orange-50 rounded-xl py-4">
               <p className={`text-4xl font-bold ${promedioManual >= 7 ? 'text-green-600' : promedioManual >= 5 ? 'text-amber-500' : 'text-red-500'}`}>
                 {promedioManual}
               </p>
@@ -584,7 +587,7 @@ Notas: ${evaluacion.notas_entrevista}
               rows={4}
               placeholder="Observaciones, impresiones, puntos destacados..."
               className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900
-                         bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                         bg-white focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
             />
           </div>
 
@@ -617,7 +620,7 @@ Notas: ${evaluacion.notas_entrevista}
             <button
               onClick={handleGuardar}
               disabled={guardando}
-              className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400
+              className="flex-1 px-4 py-2.5 bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400
                          text-white rounded-lg text-sm font-medium transition-colors"
             >
               {guardando ? 'Guardando...' : 'Guardar evaluación'}
