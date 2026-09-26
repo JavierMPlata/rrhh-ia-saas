@@ -240,7 +240,7 @@ async def disparar_webhook_n8n(
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            await client.post(
+            resp = await client.post(
                 webhook_url,
                 json=payload,
                 headers={
@@ -248,7 +248,19 @@ async def disparar_webhook_n8n(
                     "Content-Type": "application/json"
                 }
             )
-            print(f"Webhook n8n disparado para candidato {candidato_id}")
+            if resp.status_code >= 400:
+                # n8n respondió pero con error (ej: 404 = workflow inactivo,
+                # 401/403 = secreto rechazado). Antes esto se imprimía como
+                # "éxito" solo porque no lanzó excepción — ahora sí queda claro.
+                print(
+                    f"Warning: n8n respondió {resp.status_code} para candidato "
+                    f"{candidato_id}: {resp.text[:300]}"
+                )
+            else:
+                print(
+                    f"Webhook n8n disparado y aceptado ({resp.status_code}) "
+                    f"para candidato {candidato_id}"
+                )
     except Exception as e:
         print(f"Warning: No se pudo contactar n8n: {e}")
 
