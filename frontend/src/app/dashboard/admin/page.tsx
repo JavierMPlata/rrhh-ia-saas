@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import SolicitudesEliminacion from '@/components/SolicitudesEliminacion'
 
 type RegistroAuditoria = {
   id: string
@@ -47,7 +48,8 @@ export default function AdminAuditoriaPage() {
   const router = useRouter()
   const supabase = createClient()
 
-  const [pestana, setPestana] = useState<'auditoria'>('auditoria')
+  const [pestana, setPestana] = useState<'auditoria' | 'solicitudes'>('auditoria')
+  const [pendientesEliminacion, setPendientesEliminacion] = useState<number | null>(null)
   const [registros, setRegistros] = useState<RegistroAuditoria[]>([])
   const [loading, setLoading] = useState(true)
   const [userEmail, setUserEmail] = useState('')
@@ -164,13 +166,27 @@ export default function AdminAuditoriaPage() {
         </div>
 
         <div className="flex gap-1 mb-4 bg-white border border-gray-200 p-1 rounded-xl w-fit shadow-sm">
-          <button
-            onClick={() => setPestana('auditoria')}
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-950 text-orange-400 shadow-sm"
-          >
-            Auditoría ({registros.length})
-          </button>
+          {([
+            ['auditoria', `Auditoría (${registros.length})`],
+            ['solicitudes', `Eliminación de datos${pendientesEliminacion ? ` (${pendientesEliminacion} pendientes)` : ''}`],
+          ] as const).map(([clave, etiqueta]) => (
+            <button
+              key={clave}
+              onClick={() => setPestana(clave)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                pestana === clave
+                  ? 'bg-gray-950 text-orange-400 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {etiqueta}
+            </button>
+          ))}
         </div>
+
+        {pestana === 'solicitudes' && (
+          <SolicitudesEliminacion onCambioPendientes={setPendientesEliminacion} />
+        )}
 
         {pestana === 'auditoria' && (
           <>

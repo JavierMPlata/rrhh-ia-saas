@@ -2,8 +2,6 @@
 import { useState } from 'react'
 import Link from 'next/link'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-
 export default function EliminarDatos() {
   const [email, setEmail] = useState('')
   const [motivo, setMotivo] = useState('')
@@ -17,14 +15,14 @@ export default function EliminarDatos() {
     setError('')
 
     try {
-      const res = await fetch(`${API_URL}/api/candidatos/eliminar-datos`, {
+      const res = await fetch('/api/eliminar-datos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, motivo }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.detail || 'No pudimos procesar tu solicitud. Intenta de nuevo.')
+        throw new Error(data.error || 'No pudimos procesar tu solicitud. Intenta de nuevo.')
       }
       setEnviado(true)
     } catch (err: unknown) {
@@ -81,7 +79,7 @@ export default function EliminarDatos() {
             Eliminar mis datos personales
           </h1>
           <p className="text-gray-400 mt-3 max-w-lg text-sm leading-relaxed">
-            Ejerce tu derecho al olvido. Al confirmar, eliminaremos tu hoja de vida,
+            Ejerce tu derecho al olvido. Tras verificar tu identidad, eliminaremos tu hoja de vida,
             resultados de evaluación y datos de contacto de nuestro sistema de selección.
           </p>
         </div>
